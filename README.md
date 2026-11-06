@@ -16,7 +16,7 @@ GitHub's own pull request pages can't show the first group. A pending review is 
 ## Install
 
 ```sh
-gh extension install <owner>/gh-inbox
+gh extension install cs-angusbowerbrown/gh-inbox
 ```
 
 It needs Python 3, and it uses your existing `gh` login, so there's no token to set up. The terminal view also needs [Bun](https://bun.sh). The first `gh inbox tui` installs its dependencies.
