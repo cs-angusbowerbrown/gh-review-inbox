@@ -155,10 +155,14 @@ export function App({ load, open }: { load: () => Promise<Inbox>; open: (url: st
 
   const groups = visibleGroups(inbox, query)
   const list = groups.flatMap((g) => g.rows)
-  const current = list[Math.min(cursor, list.length - 1)]
+  const index = Math.min(cursor, list.length - 1)
+  const current = list[index]
 
   useEffect(() => {
-    if (current) scroll.current?.scrollChildIntoView(current.key)
+    if (!current) return
+    if (index === 0) scroll.current?.scrollTo(0)
+    else if (index === list.length - 1) scroll.current?.scrollTo(Infinity)
+    else scroll.current?.scrollChildIntoView(current.key, { align: "nearest", inset: 1 })
   }, [current?.key])
 
   const move = (delta: number) => setCursor((c) => Math.max(0, Math.min(c + delta, list.length - 1)))
@@ -201,10 +205,13 @@ export function App({ load, open }: { load: () => Promise<Inbox>; open: (url: st
     <box flexDirection="column" height={height} padding={1}>
       <box flexDirection="row" justifyContent="space-between" paddingLeft={1} paddingRight={1} flexShrink={0}>
         <text fg={C.fg}><strong>Review inbox</strong></text>
-        <text fg={C.muted}>{status}</text>
+        <text fg={C.muted}>
+          {list.length ? <span fg={C.fg}>{`${index + 1}/${list.length}  `}</span> : null}
+          {status}
+        </text>
       </box>
       {error ? <text fg={C.red} paddingLeft={1}>{error}</text> : null}
-      <scrollbox ref={scroll} flexGrow={1} flexShrink={1} minHeight={0} marginTop={1}>
+      <scrollbox ref={scroll} flexGrow={1} flexShrink={1} minHeight={0} marginTop={1} verticalScrollbarOptions={{ visible: false }}>
         <box flexDirection="column" onMouseScroll={wheel}>
         {inbox && !groups.length ? <text fg={C.muted} paddingLeft={1}>{`No pull requests match "${query}".`}</text> : null}
         {inbox
