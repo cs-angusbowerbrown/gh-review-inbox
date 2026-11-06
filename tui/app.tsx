@@ -47,7 +47,20 @@ const C = {
   match: "#5c4813",
 }
 
-const KEYS = [["j/k", "move"], ["g/G", "top/bottom"], ["/", "filter"], ["o", "open"], ["r", "refresh"], ["q", "quit"]]
+const KEYS: { key: string; label: string; footer?: string }[] = [
+  { key: "j / k", label: "move down / up", footer: "move" },
+  { key: "↓ / ↑ / wheel", label: "move down / up" },
+  { key: "g / G", label: "jump to top / bottom" },
+  { key: "o / enter", label: "open pull request", footer: "open" },
+  { key: "f", label: "open files changed", footer: "files" },
+  { key: "/", label: "filter by title, repo or author", footer: "filter" },
+  { key: "esc", label: "clear filter" },
+  { key: "r", label: "refresh", footer: "refresh" },
+  { key: "?", label: "toggle this help", footer: "help" },
+  { key: "q", label: "quit", footer: "quit" },
+]
+
+const FOOTER = KEYS.filter((k) => k.footer).map((k) => [k.key.split(" ")[0], k.footer!])
 
 const CHECK_COLOR = { SUCCESS: C.green, FAILURE: C.red, ERROR: C.red, PENDING: C.amber, EXPECTED: C.amber }
 
@@ -84,6 +97,25 @@ function Highlighted({ text, query }: { text: string; query: string }) {
   )
 }
 
+function Help({ width, height }: { width: number; height: number }) {
+  const keyWidth = Math.max(...KEYS.map((k) => k.key.length))
+  const boxWidth = Math.min(width - 4, keyWidth + 40)
+  const boxHeight = KEYS.length + 4
+  return (
+    <box position="absolute" zIndex={10} left={Math.max(0, Math.floor((width - boxWidth) / 2))}
+      top={Math.max(0, Math.floor((height - boxHeight) / 2))} width={boxWidth} height={boxHeight}
+      flexDirection="column" border borderStyle="rounded" borderColor={C.accent} backgroundColor="#0d1117"
+      paddingLeft={2} paddingRight={2} paddingTop={1} title=" keys " titleAlignment="center">
+      {KEYS.map((k) => (
+        <text key={k.key} wrapMode="none" truncate>
+          <span fg={C.accent}>{k.key.padEnd(keyWidth + 3)}</span>
+          <span fg={C.fg}>{k.label}</span>
+        </text>
+      ))}
+    </box>
+  )
+}
+
 function PrRow({ row, selected, query }: { row: Row; selected: boolean; query: string }) {
   const when = row.draftUpdatedAt ? `draft updated ${ago(row.draftUpdatedAt)}` : `updated ${ago(row.updatedAt)}`
   return (
@@ -115,7 +147,7 @@ function PrRow({ row, selected, query }: { row: Row; selected: boolean; query: s
 
 export function App({ load, open }: { load: () => Promise<Inbox>; open: (url: string) => void }) {
   const renderer = useRenderer()
-  const { height } = useTerminalDimensions()
+  const { width, height } = useTerminalDimensions()
   const scroll = useRef<ScrollBoxRenderable>(null)
   const [inbox, setInbox] = useState<Inbox | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -123,6 +155,7 @@ export function App({ load, open }: { load: () => Promise<Inbox>; open: (url: st
   const [cursor, setCursor] = useState(0)
   const [query, setQuery] = useState("")
   const [filtering, setFiltering] = useState(false)
+  const [help, setHelp] = useState(false)
   const [, tick] = useState(0)
   const inFlight = useRef(false)
   const lastFetch = useRef(0)
@@ -186,6 +219,10 @@ export function App({ load, open }: { load: () => Promise<Inbox>; open: (url: st
         setFiltering(false)
       }
     }
+    else if (help) {
+      if (key.name === "escape" || key.name === "q" || key.sequence === "?") setHelp(false)
+    }
+    else if (key.sequence === "?") setHelp(true)
     else if (key.name === "escape") filter("")
     else if (key.name === "/" || key.sequence === "/") setFiltering(true)
     else if (key.name === "q") renderer.destroy()
@@ -194,7 +231,8 @@ export function App({ load, open }: { load: () => Promise<Inbox>; open: (url: st
     else if (key.name === "G" || (key.shift && key.name === "g")) setCursor(list.length - 1)
     else if (key.name === "g") setCursor(0)
     else if (key.name === "r") refresh()
-    else if (key.name === "o" && current) open(current.url)
+    else if ((key.name === "o" || key.name === "return") && current) open(current.url)
+    else if (key.name === "f" && current) open(`${current.url}/files`)
   })
 
   const status = loading
@@ -247,14 +285,15 @@ export function App({ load, open }: { load: () => Promise<Inbox>; open: (url: st
         </box>
       ) : (
         <text paddingLeft={1} flexShrink={0}>
-          {KEYS.map(([key, label], i) => (
+          {FOOTER.map(([key, label], i) => (
             <span key={key}>
               <span fg={C.fg}>{key}</span>
-              <span fg={C.muted}>{` ${label}${i < KEYS.length - 1 ? "   " : ""}`}</span>
+              <span fg={C.muted}>{` ${label}${i < FOOTER.length - 1 ? "   " : ""}`}</span>
             </span>
           ))}
         </text>
       )}
+      {help ? <Help width={width} height={height} /> : null}
     </box>
   )
 }
