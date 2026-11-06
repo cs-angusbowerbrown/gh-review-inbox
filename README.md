@@ -19,18 +19,21 @@ GitHub's own pull request pages can't show the first group. A pending review is 
 gh extension install <owner>/gh-inbox
 ```
 
-It needs Python 3, and it uses your existing `gh` login, so there's no token to set up.
+It needs Python 3, and it uses your existing `gh` login, so there's no token to set up. The terminal view also needs [Bun](https://bun.sh). The first `gh inbox tui` installs its dependencies.
 
 ## Use
 
 ```sh
 gh inbox          # serve the inbox on http://127.0.0.1:7357 and open it
+gh inbox tui      # the same inbox in the terminal
 gh inbox --json   # print the inbox as JSON
 ```
 
 The page is meant to stay open in a tab. It refreshes when you come back to it, and links open in a new tab. Review links go straight to "Files changed".
 
 `--port` picks another port, and `--no-open` skips opening the browser.
+
+The terminal view is built with [OpenTUI](https://opentui.com). `j`/`k` move, `enter` opens the selected PR's changes, `o` opens the PR itself, `r` refreshes and `q` quits. It also refreshes when the terminal regains focus.
 
 ## How drafts are found
 

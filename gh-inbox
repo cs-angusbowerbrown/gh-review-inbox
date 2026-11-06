@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import argparse
 import json
+import os
+import shutil
 import subprocess
 import sys
 import webbrowser
@@ -9,7 +11,9 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-PAGE = Path(__file__).resolve().parent / "index.html"
+ROOT = Path(__file__).resolve().parent
+PAGE = ROOT / "index.html"
+TUI = ROOT / "tui"
 OPEN = "is:open is:pr archived:false"
 
 PR_FIELDS = """
@@ -152,8 +156,18 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
 
+def tui():
+    bun = shutil.which("bun")
+    if not bun:
+        sys.exit("gh inbox tui needs Bun: https://bun.sh")
+    if not (TUI / "node_modules").exists():
+        subprocess.run([bun, "install", "--frozen-lockfile"], cwd=TUI, check=True)
+    os.execv(bun, [bun, "run", str(TUI / "index.tsx")])
+
+
 def main():
     parser = argparse.ArgumentParser(prog="gh inbox", description="Local review inbox for your GitHub account.")
+    parser.add_argument("view", nargs="?", choices=["web", "tui"], default="web", help="web page (default) or terminal UI")
     parser.add_argument("--port", type=int, default=7357)
     parser.add_argument("--no-open", action="store_true", help="don't open the browser")
     parser.add_argument("--json", action="store_true", help="print the inbox as JSON and exit")
@@ -161,6 +175,9 @@ def main():
 
     if args.json:
         json.dump(inbox(), sys.stdout, indent=2)
+        return
+    if args.view == "tui":
+        tui()
         return
 
     url = f"http://127.0.0.1:{args.port}/"
