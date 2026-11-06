@@ -33,7 +33,7 @@ The page is meant to stay open in a tab. It refreshes when you come back to it, 
 
 `--port` picks another port, and `--no-open` skips opening the browser.
 
-The terminal view is built with [OpenTUI](https://opentui.com). `j`/`k` move, `g`/`G` jump to the top and bottom, `enter` opens the selected PR's changes, `o` opens the PR itself, `r` refreshes and `q` quits. `/` filters by title, repository, PR number or author. `enter` keeps the filter while you move through the matches, and `esc` clears it. It also refreshes when the terminal regains focus.
+The terminal view is built with [OpenTUI](https://opentui.com). `j`/`k` or the mouse wheel move the selection, `g`/`G` jump to the top and bottom, `o` opens the selected PR, `r` refreshes and `q` quits. `/` filters by title, repository, PR number or author and highlights the matches. `enter` keeps the filter while you move through them, and `esc` clears it. It also refreshes when the terminal regains focus.
 
 ## How drafts are found
 
