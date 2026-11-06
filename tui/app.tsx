@@ -60,9 +60,15 @@ function ago(iso: string) {
 
 type Entry = { row: Row; href: string }
 
-function entries(inbox: Inbox | null): Entry[] {
+function matches(row: Row, query: string) {
+  const needle = query.toLowerCase()
+  return [row.title, `${row.repo}#${row.number}`, row.author].some((field) => field.toLowerCase().includes(needle))
+}
+
+function visibleGroups(inbox: Inbox | null, query: string) {
   if (!inbox) return []
-  return GROUPS.flatMap((g) => inbox.groups[g.id].map((row) => ({ row, href: row.url + g.path })))
+  return GROUPS.map((g) => ({ ...g, rows: inbox.groups[g.id].filter((row) => matches(row, query)) }))
+    .filter((g) => !query || g.rows.length)
 }
 
 function PrRow({ row, selected }: { row: Row; selected: boolean }) {
@@ -95,6 +101,8 @@ export function App({ load, open }: { load: () => Promise<Inbox>; open: (url: st
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [cursor, setCursor] = useState(0)
+  const [query, setQuery] = useState("")
+  const [filtering, setFiltering] = useState(false)
   const [, tick] = useState(0)
   const inFlight = useRef(false)
   const lastFetch = useRef(0)
@@ -125,19 +133,34 @@ export function App({ load, open }: { load: () => Promise<Inbox>; open: (url: st
     if (Date.now() - lastFetch.current > STALE_MS) refresh()
   })
 
-  const list = entries(inbox)
+  const groups = visibleGroups(inbox, query)
+  const list: Entry[] = groups.flatMap((g) => g.rows.map((row) => ({ row, href: row.url + g.path })))
   const current = list[Math.min(cursor, list.length - 1)]
 
   useEffect(() => {
     if (current) scroll.current?.scrollChildIntoView(current.row.key)
   }, [current?.row.key])
 
+  const filter = (value: string) => {
+    setQuery(value)
+    setCursor(0)
+  }
+
   useKeyboard((key) => {
-    if (key.name === "q" || (key.ctrl && key.name === "c")) renderer.destroy()
+    if (key.ctrl && key.name === "c") renderer.destroy()
+    else if (filtering) {
+      if (key.name === "escape") {
+        filter("")
+        setFiltering(false)
+      }
+    }
+    else if (key.name === "escape") filter("")
+    else if (key.name === "/" || key.sequence === "/") setFiltering(true)
+    else if (key.name === "q") renderer.destroy()
     else if (key.name === "j" || key.name === "down") setCursor((c) => Math.min(c + 1, list.length - 1))
     else if (key.name === "k" || key.name === "up") setCursor((c) => Math.max(c - 1, 0))
-    else if (key.name === "g") setCursor(0)
     else if (key.name === "G" || (key.shift && key.name === "g")) setCursor(list.length - 1)
+    else if (key.name === "g") setCursor(0)
     else if (key.name === "r") refresh()
     else if ((key.name === "return" || key.name === "enter") && current) open(current.href)
     else if (key.name === "o" && current) open(current.row.url)
@@ -155,9 +178,10 @@ export function App({ load, open }: { load: () => Promise<Inbox>; open: (url: st
       </box>
       {error ? <text fg={C.red} paddingLeft={1}>{error}</text> : null}
       <scrollbox ref={scroll} flexGrow={1} marginTop={1}>
+        {inbox && !groups.length ? <text fg={C.muted} paddingLeft={1}>{`No pull requests match "${query}".`}</text> : null}
         {inbox
-          ? GROUPS.map((g) => {
-              const rows = inbox.groups[g.id]
+          ? groups.map((g) => {
+              const rows = g.rows
               return (
                 <box key={g.id} flexDirection="column" marginBottom={1} border borderStyle="rounded" borderColor={C.border}
                   title={` ${g.title} (${rows.length})${g.hint ? ` · ${g.hint}` : ""} `}>
@@ -169,7 +193,19 @@ export function App({ load, open }: { load: () => Promise<Inbox>; open: (url: st
             })
           : null}
       </scrollbox>
-      <text fg={C.muted} paddingLeft={1}>j/k move · enter open files · o open PR · r refresh · q quit</text>
+      {filtering ? (
+        <box flexDirection="row" paddingLeft={1}>
+          <text fg={C.fg}>/</text>
+          <input flexGrow={1} focused value={query} onInput={filter} onSubmit={() => setFiltering(false)} />
+        </box>
+      ) : query ? (
+        <text fg={C.muted} paddingLeft={1}>
+          <span fg={C.accent}>{`/${query}`}</span>
+          {`  ${list.length} match${list.length === 1 ? "" : "es"} · / edit · esc clear`}
+        </text>
+      ) : (
+        <text fg={C.muted} paddingLeft={1}>j/k move · g/G top/bottom · / filter · enter open files · o open PR · r refresh · q quit</text>
+      )}
     </box>
   )
 }
