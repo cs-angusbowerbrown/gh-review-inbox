@@ -16,6 +16,14 @@ function open(url: string) {
   Bun.spawn([command, url], { stdout: "ignore", stderr: "ignore" })
 }
 
+const servers: ReturnType<typeof Bun.spawn>[] = []
+
+function web() {
+  servers.push(Bun.spawn([script, "web"], { stdin: "ignore", stdout: "ignore", stderr: "ignore" }))
+}
+
+process.on("exit", () => servers.forEach((server) => server.kill()))
+
 const renderer = await createCliRenderer({ exitOnCtrlC: false })
 renderer.on("destroy", () => process.exit(0))
-createRoot(renderer).render(<App load={load} open={open} />)
+createRoot(renderer).render(<App load={load} open={open} web={web} />)

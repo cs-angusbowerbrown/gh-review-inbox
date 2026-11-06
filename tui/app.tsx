@@ -53,6 +53,7 @@ const KEYS: { key: string; label: string; footer?: string }[] = [
   { key: "g / G", label: "jump to top / bottom" },
   { key: "o / enter", label: "open pull request", footer: "open" },
   { key: "f", label: "open files changed", footer: "files" },
+  { key: "W", label: "start and open the web view" },
   { key: "/", label: "filter by title, repo or author", footer: "filter" },
   { key: "esc", label: "clear filter" },
   { key: "r", label: "refresh", footer: "refresh" },
@@ -97,22 +98,47 @@ function Highlighted({ text, query }: { text: string; query: string }) {
   )
 }
 
-function Help({ width, height }: { width: number; height: number }) {
-  const keyWidth = Math.max(...KEYS.map((k) => k.key.length))
-  const boxWidth = Math.min(width - 4, keyWidth + 40)
-  const boxHeight = KEYS.length + 4
+function Modal({ screen, size, title, children }: {
+  screen: { width: number; height: number }
+  size: { width: number; height: number }
+  title: string
+  children: React.ReactNode
+}) {
+  const width = Math.min(screen.width - 4, size.width)
   return (
-    <box position="absolute" zIndex={10} left={Math.max(0, Math.floor((width - boxWidth) / 2))}
-      top={Math.max(0, Math.floor((height - boxHeight) / 2))} width={boxWidth} height={boxHeight}
+    <box position="absolute" zIndex={10} left={Math.max(0, Math.floor((screen.width - width) / 2))}
+      top={Math.max(0, Math.floor((screen.height - size.height) / 2))} width={width} height={size.height}
       flexDirection="column" border borderStyle="rounded" borderColor={C.accent} backgroundColor="#0d1117"
-      paddingLeft={2} paddingRight={2} paddingTop={1} title=" keys " titleAlignment="center">
+      paddingLeft={2} paddingRight={2} paddingTop={1} title={` ${title} `} titleAlignment="center">
+      {children}
+    </box>
+  )
+}
+
+function Help({ screen }: { screen: { width: number; height: number } }) {
+  const keyWidth = Math.max(...KEYS.map((k) => k.key.length))
+  return (
+    <Modal screen={screen} size={{ width: keyWidth + 40, height: KEYS.length + 4 }} title="keys">
       {KEYS.map((k) => (
         <text key={k.key} wrapMode="none" truncate>
           <span fg={C.accent}>{k.key.padEnd(keyWidth + 3)}</span>
           <span fg={C.fg}>{k.label}</span>
         </text>
       ))}
-    </box>
+    </Modal>
+  )
+}
+
+function ConfirmWeb({ screen }: { screen: { width: number; height: number } }) {
+  return (
+    <Modal screen={screen} size={{ width: 54, height: 8 }} title="web view">
+      <text fg={C.fg}>Start the web view server in the background?</text>
+      <text fg={C.muted}>It stops when you quit the TUI.</text>
+      <text marginTop={1}>
+        <span fg={C.accent}>y</span><span fg={C.muted}> start and open   </span>
+        <span fg={C.accent}>n</span><span fg={C.muted}> cancel</span>
+      </text>
+    </Modal>
   )
 }
 
@@ -145,7 +171,7 @@ function PrRow({ row, selected, query }: { row: Row; selected: boolean; query: s
   )
 }
 
-export function App({ load, open }: { load: () => Promise<Inbox>; open: (url: string) => void }) {
+export function App({ load, open, web }: { load: () => Promise<Inbox>; open: (url: string) => void; web: () => void }) {
   const renderer = useRenderer()
   const { width, height } = useTerminalDimensions()
   const scroll = useRef<ScrollBoxRenderable>(null)
@@ -156,6 +182,8 @@ export function App({ load, open }: { load: () => Promise<Inbox>; open: (url: st
   const [query, setQuery] = useState("")
   const [filtering, setFiltering] = useState(false)
   const [help, setHelp] = useState(false)
+  const [confirmWeb, setConfirmWeb] = useState(false)
+  const [serving, setServing] = useState(false)
   const [, tick] = useState(0)
   const inFlight = useRef(false)
   const lastFetch = useRef(0)
@@ -219,6 +247,14 @@ export function App({ load, open }: { load: () => Promise<Inbox>; open: (url: st
         setFiltering(false)
       }
     }
+    else if (confirmWeb) {
+      if (key.name === "y") {
+        web()
+        setServing(true)
+        setConfirmWeb(false)
+      }
+      else if (key.name === "n" || key.name === "escape") setConfirmWeb(false)
+    }
     else if (help) {
       if (key.name === "escape" || key.name === "q" || key.sequence === "?") setHelp(false)
     }
@@ -231,6 +267,7 @@ export function App({ load, open }: { load: () => Promise<Inbox>; open: (url: st
     else if (key.name === "G" || (key.shift && key.name === "g")) setCursor(list.length - 1)
     else if (key.name === "g") setCursor(0)
     else if (key.name === "r") refresh()
+    else if (key.shift && key.name === "w") serving ? web() : setConfirmWeb(true)
     else if ((key.name === "o" || key.name === "return") && current) open(current.url)
     else if (key.name === "f" && current) open(`${current.url}/files`)
   })
@@ -284,16 +321,17 @@ export function App({ load, open }: { load: () => Promise<Inbox>; open: (url: st
           </text>
         </box>
       ) : (
-        <text paddingLeft={1} flexShrink={0}>
+        <text paddingLeft={1} flexShrink={0} wrapMode="none" truncate>
           {FOOTER.map(([key, label], i) => (
             <span key={key}>
               <span fg={C.fg}>{key}</span>
-              <span fg={C.muted}>{` ${label}${i < FOOTER.length - 1 ? "   " : ""}`}</span>
+              <span fg={C.muted}>{` ${label}${i < FOOTER.length - 1 ? "  " : ""}`}</span>
             </span>
           ))}
         </text>
       )}
-      {help ? <Help width={width} height={height} /> : null}
+      {help ? <Help screen={{ width, height }} /> : null}
+      {confirmWeb ? <ConfirmWeb screen={{ width, height }} /> : null}
     </box>
   )
 }
