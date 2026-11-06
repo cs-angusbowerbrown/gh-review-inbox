@@ -1,5 +1,5 @@
 {
-  "name": "gh-inbox-tui",
+  "name": "gh-review-inbox-tui",
   "private": true,
   "type": "module",
   "dependencies": {

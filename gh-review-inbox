@@ -159,14 +159,14 @@ class Handler(BaseHTTPRequestHandler):
 def tui():
     bun = shutil.which("bun")
     if not bun:
-        sys.exit("gh inbox tui needs Bun: https://bun.sh")
+        sys.exit("gh review-inbox tui needs Bun: https://bun.sh")
     if not (TUI / "node_modules").exists():
         subprocess.run([bun, "install", "--frozen-lockfile"], cwd=TUI, check=True)
     os.execv(bun, [bun, "run", str(TUI / "index.tsx")])
 
 
 def main():
-    parser = argparse.ArgumentParser(prog="gh inbox", description="Local review inbox for your GitHub account.")
+    parser = argparse.ArgumentParser(prog="gh review-inbox", description="Local review inbox for your GitHub account.")
     parser.add_argument("view", nargs="?", choices=["web", "tui"], default="web", help="web page (default) or terminal UI")
     parser.add_argument("--port", type=int, default=7357)
     parser.add_argument("--no-open", action="store_true", help="don't open the browser")
@@ -184,12 +184,12 @@ def main():
     try:
         server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     except OSError:
-        print(f"Port {args.port} is in use; opening {url} on the assumption gh inbox is already running.")
+        print(f"Port {args.port} is in use; opening {url} on the assumption gh review-inbox is already running.")
         if not args.no_open:
             webbrowser.open(url)
         return
 
-    print(f"gh inbox on {url} (Ctrl-C to stop)")
+    print(f"gh review-inbox on {url} (Ctrl-C to stop)")
     if not args.no_open:
         webbrowser.open(url)
     try:
