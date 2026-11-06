@@ -1,0 +1,185 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import subprocess
+import sys
+import webbrowser
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+PAGE = Path(__file__).resolve().parent / "index.html"
+OPEN = "is:open is:pr archived:false"
+
+PR_FIELDS = """
+fragment pr on PullRequest {
+  number title url isDraft updatedAt additions deletions reviewDecision
+  author { login }
+  repository { nameWithOwner }
+  commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+  reviews(states: PENDING, first: 10) { nodes { author { login } updatedAt comments { totalCount } } }
+}
+"""
+
+SEARCH = PR_FIELDS + """
+query($q: String!, $endCursor: String) {
+  search(query: $q, type: ISSUE, first: 50, after: $endCursor) {
+    pageInfo { hasNextPage endCursor }
+    nodes { ...pr }
+  }
+}
+"""
+
+SCAN = """
+query($q: String!, $endCursor: String) {
+  search(query: $q, type: ISSUE, first: 100, after: $endCursor) {
+    pageInfo { hasNextPage endCursor }
+    nodes { ... on PullRequest { id reviews(states: PENDING, first: 10) { nodes { author { login } } } } }
+  }
+}
+"""
+
+VIEWER = "{ viewer { login organizations(first: 100) { nodes { login } } } }"
+
+
+def graphql(query, **variables):
+    args = ["gh", "api", "graphql", "-f", f"query={query}"]
+    for key, value in variables.items():
+        if value is not None:
+            args += ["-f", f"{key}={value}"]
+    result = subprocess.run(args, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or "gh api graphql failed")
+    return json.loads(result.stdout)["data"]
+
+
+def search(q, query=SEARCH):
+    nodes, cursor = [], None
+    while True:
+        page = graphql(query, q=q, endCursor=cursor)["search"]
+        nodes += [n for n in page["nodes"] if n]
+        if not page["pageInfo"]["hasNextPage"]:
+            return nodes
+        cursor = page["pageInfo"]["endCursor"]
+
+
+def pending_by(login, owners):
+    hits = search(f"{OPEN} {' '.join(owners)}", SCAN)
+    ids = [pr["id"] for pr in hits if any((r["author"] or {}).get("login") == login for r in pr["reviews"]["nodes"])]
+    if not ids:
+        return []
+    return graphql(PR_FIELDS + "query { nodes(ids: %s) { ...pr } }" % json.dumps(ids))["nodes"]
+
+
+def row(pr, login):
+    rollup = (pr["commits"]["nodes"] or [{}])[0].get("commit", {}).get("statusCheckRollup")
+    mine = [r for r in pr["reviews"]["nodes"] if (r["author"] or {}).get("login") == login]
+    return {
+        "key": f'{pr["repository"]["nameWithOwner"]}#{pr["number"]}',
+        "repo": pr["repository"]["nameWithOwner"],
+        "number": pr["number"],
+        "title": pr["title"],
+        "url": pr["url"],
+        "author": (pr["author"] or {}).get("login", "ghost"),
+        "isDraft": pr["isDraft"],
+        "updatedAt": pr["updatedAt"],
+        "additions": pr["additions"],
+        "deletions": pr["deletions"],
+        "reviewDecision": pr["reviewDecision"],
+        "checks": rollup["state"] if rollup else None,
+        "draftComments": sum(r["comments"]["totalCount"] for r in mine) if mine else None,
+        "draftUpdatedAt": max(r["updatedAt"] for r in mine) if mine else None,
+    }
+
+
+def inbox():
+    viewer = graphql(VIEWER)["viewer"]
+    login = viewer["login"]
+    owners = [f"org:{o['login']}" for o in viewer["organizations"]["nodes"]] + [f"user:{login}"]
+    queries = {
+        "requested": f"{OPEN} review-requested:@me",
+        "reviewed": f"{OPEN} reviewed-by:@me -author:@me",
+        "mine": f"{OPEN} author:@me",
+    }
+    with ThreadPoolExecutor(len(queries) + 1) as pool:
+        scan = pool.submit(pending_by, login, owners)
+        found = dict(zip(queries, pool.map(search, queries.values())))
+        found["scan"] = scan.result()
+
+    rows = {name: [row(pr, login) for pr in prs] for name, prs in found.items()}
+    drafts = [r for r in rows["scan"] + rows["requested"] + rows["reviewed"] if r["draftComments"] is not None]
+    drafts = list({r["key"]: r for r in drafts}.values())
+    seen = {r["key"] for r in drafts}
+    requested = [r for r in rows["requested"] if r["key"] not in seen]
+    seen |= {r["key"] for r in requested}
+    reviewed = [r for r in rows["reviewed"] if r["key"] not in seen]
+
+    by_recent = lambda r: r["draftUpdatedAt"] or r["updatedAt"]
+    return {
+        "login": login,
+        "owners": [o.split(":", 1)[1] for o in owners],
+        "fetchedAt": datetime.now(timezone.utc).isoformat(),
+        "groups": {
+            "drafts": sorted(drafts, key=by_recent, reverse=True),
+            "requested": sorted(requested, key=by_recent, reverse=True),
+            "reviewed": sorted(reviewed, key=by_recent, reverse=True),
+            "mine": sorted(rows["mine"], key=by_recent, reverse=True),
+        },
+    }
+
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == "/":
+            self.send(200, "text/html; charset=utf-8", PAGE.read_bytes())
+        elif self.path == "/api/inbox":
+            try:
+                self.send(200, "application/json", json.dumps(inbox()).encode())
+            except Exception as error:
+                self.send(502, "application/json", json.dumps({"error": str(error)}).encode())
+        else:
+            self.send(404, "text/plain", b"not found")
+
+    def send(self, status, content_type, body):
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args):
+        pass
+
+
+def main():
+    parser = argparse.ArgumentParser(prog="gh inbox", description="Local review inbox for your GitHub account.")
+    parser.add_argument("--port", type=int, default=7357)
+    parser.add_argument("--no-open", action="store_true", help="don't open the browser")
+    parser.add_argument("--json", action="store_true", help="print the inbox as JSON and exit")
+    args = parser.parse_args()
+
+    if args.json:
+        json.dump(inbox(), sys.stdout, indent=2)
+        return
+
+    url = f"http://127.0.0.1:{args.port}/"
+    try:
+        server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+    except OSError:
+        print(f"Port {args.port} is in use; opening {url} on the assumption gh inbox is already running.")
+        if not args.no_open:
+            webbrowser.open(url)
+        return
+
+    print(f"gh inbox on {url} (Ctrl-C to stop)")
+    if not args.no_open:
+        webbrowser.open(url)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+
+
+if __name__ == "__main__":
+    main()
