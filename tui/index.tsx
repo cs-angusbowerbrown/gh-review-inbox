@@ -22,10 +22,13 @@ function web() {
   servers.push(Bun.spawn([script, "web"], { stdin: "ignore", stdout: "ignore", stderr: "ignore" }))
 }
 
-process.stdout.write("\x1b[22;2t")
+const SAVE_TERMINAL_TITLE = "\x1b[22;2t"
+const RESTORE_TERMINAL_TITLE = "\x1b[23;2t"
+
+process.stdout.write(SAVE_TERMINAL_TITLE)
 process.on("exit", () => {
   servers.forEach((server) => server.kill())
-  process.stdout.write("\x1b[23;2t")
+  process.stdout.write(RESTORE_TERMINAL_TITLE)
 })
 
 const renderer = await createCliRenderer({ exitOnCtrlC: false })

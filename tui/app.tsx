@@ -56,8 +56,12 @@ const PAGES: { title: string; groups: Group[]; optional: Optional }[] = [
   },
 ]
 
+function defaultGroups(page: number) {
+  return PAGES[page].groups.filter((g) => g.id !== PAGES[page].optional.id)
+}
+
 function pageCount(inbox: Inbox, page: number) {
-  return PAGES[page].groups.filter((g) => g.id !== PAGES[page].optional.id).reduce((sum, g) => sum + inbox.groups[g.id].length, 0)
+  return defaultGroups(page).reduce((sum, g) => sum + inbox.groups[g.id].length, 0)
 }
 
 const C = {
@@ -95,7 +99,8 @@ const FOOTER_DROP_ORDER = ["r", "f", "/", "j/k", "1/2", "a", "d"]
 
 function footer(optional: Optional, shown: boolean, count: number, width: number) {
   const toggle = [optional.key, `${shown ? "hide" : "show"} ${optional.noun}`]
-  let items = count ? [...FOOTER.slice(0, 4), toggle, ...FOOTER.slice(4)] : FOOTER
+  const at = FOOTER.findIndex(([key]) => key === "/")
+  let items = count ? [...FOOTER.slice(0, at), toggle, ...FOOTER.slice(at)] : FOOTER
   const length = () => items.reduce((sum, [key, label]) => sum + key.length + label.length + 3, -2)
   for (const key of FOOTER_DROP_ORDER) {
     if (length() <= width) break
@@ -122,11 +127,19 @@ function matches(row: Row, query: string) {
   return [row.title, `${row.repo}#${row.number}`, row.author].some((field) => field.toLowerCase().includes(needle))
 }
 
-function visibleGroups(inbox: Inbox | null, page: number, query: string, shown: Set<GroupId>) {
+type VisibleGroup = Group & { rows: Row[] }
+
+function visibleGroups(inbox: Inbox | null, page: number, query: string, shown: Set<GroupId>): VisibleGroup[] {
   if (!inbox) return []
-  return PAGES[page].groups.filter((g) => shown.has(g.id) || g.id !== PAGES[page].optional.id)
+  return (shown.has(PAGES[page].optional.id) ? PAGES[page].groups : defaultGroups(page))
     .map((g) => ({ ...g, rows: inbox.groups[g.id].filter((row) => matches(row, query)) }))
     .filter((g) => !query || g.rows.length)
+}
+
+function selection(groups: VisibleGroup[], cursor: number) {
+  const list = groups.flatMap((g) => g.rows)
+  const index = Math.min(cursor, list.length - 1)
+  return { list, index, current: list[index] }
 }
 
 function fit(parts: string[], width: number) {
@@ -270,17 +283,12 @@ function PrRow({ row, selected, query, group }: { row: Row; selected: boolean; q
   )
 }
 
-function selectedKey(inbox: Inbox | null, page: number, query: string, shown: Set<GroupId>, cursor: number) {
-  const list = visibleGroups(inbox, page, query, shown).flatMap((g) => g.rows)
-  return list[Math.min(cursor, list.length - 1)]?.key
-}
-
-function PageView({ inbox, page, query, shown, width, loading, frame, selected }: {
-  inbox: Inbox | null; page: number; query: string; shown: Set<GroupId>; width: number; loading: boolean; frame: number; selected?: string
+function PageView({ inbox, page, groups, query, shown, width, loading, frame, selected }: {
+  inbox: Inbox | null; page: number; groups: VisibleGroup[]; query: string; shown: Set<GroupId>
+  width: number; loading: boolean; frame: number; selected?: string
 }) {
   const optional = PAGES[page].optional
-  if (!inbox) return loading ? <Skeleton groups={PAGES[page].groups.filter((g) => g.id !== optional.id)} frame={frame} width={width} /> : null
-  const groups = visibleGroups(inbox, page, query, shown)
+  if (!inbox) return loading ? <Skeleton groups={defaultGroups(page)} frame={frame} width={width} /> : null
   if (!groups.length) return <text fg={C.muted} paddingLeft={1}>{`No pull requests match "${query}".`}</text>
   return (
     <>
@@ -301,26 +309,10 @@ function PageView({ inbox, page, query, shown, width, loading, frame, selected }
   )
 }
 
-export function App({ load, open, web }: { load: () => Promise<Inbox>; open: (url: string) => void; web: () => void }) {
-  const renderer = useRenderer()
-  const { width, height } = useTerminalDimensions()
-  const scrolls = useRef<(ScrollBoxRenderable | null)[]>([])
-  const shownPage = useRef(0)
-  const lastWheel = useRef(0)
-  const holdWheel = useRef(false)
+function useInbox(load: () => Promise<Inbox>) {
   const [inbox, setInbox] = useState<Inbox | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
-  const [cursors, setCursors] = useState(PAGES.map(() => 0))
-  const [query, setQuery] = useState("")
-  const [filtering, setFiltering] = useState(false)
-  const [help, setHelp] = useState(false)
-  const [confirmWeb, setConfirmWeb] = useState(false)
-  const [serving, setServing] = useState(false)
-  const [shown, setShown] = useState<Set<GroupId>>(new Set())
-  const [page, setPage] = useState(0)
-  const [, tick] = useState(0)
-  const [frame, setFrame] = useState(0)
   const inFlight = useRef(false)
   const lastFetch = useRef(0)
 
@@ -342,9 +334,38 @@ export function App({ load, open, web }: { load: () => Promise<Inbox>; open: (ur
 
   useEffect(() => {
     refresh()
+  }, [refresh])
+
+  useFocus(() => {
+    if (Date.now() - lastFetch.current > STALE_MS) refresh()
+  })
+
+  return { inbox, error, loading, refresh }
+}
+
+type Overlay = "filter" | "help" | "confirmWeb" | null
+
+export function App({ load, open, web }: { load: () => Promise<Inbox>; open: (url: string) => void; web: () => void }) {
+  const renderer = useRenderer()
+  const { width, height } = useTerminalDimensions()
+  const scrolls = useRef<(ScrollBoxRenderable | null)[]>([])
+  const shownPage = useRef(0)
+  const lastWheel = useRef(0)
+  const holdWheel = useRef(false)
+  const { inbox, error, loading, refresh } = useInbox(load)
+  const [cursors, setCursors] = useState(PAGES.map(() => 0))
+  const [query, setQuery] = useState("")
+  const [overlay, setOverlay] = useState<Overlay>(null)
+  const [serving, setServing] = useState(false)
+  const [shown, setShown] = useState<Set<GroupId>>(new Set())
+  const [page, setPage] = useState(0)
+  const [, tick] = useState(0)
+  const [frame, setFrame] = useState(0)
+
+  useEffect(() => {
     const timer = setInterval(() => tick((n) => n + 1), 30_000)
     return () => clearInterval(timer)
-  }, [refresh])
+  }, [])
 
   useEffect(() => {
     if (!loading) return
@@ -352,20 +373,16 @@ export function App({ load, open, web }: { load: () => Promise<Inbox>; open: (ur
     return () => clearInterval(timer)
   }, [loading])
 
-  useFocus(() => {
-    if (Date.now() - lastFetch.current > STALE_MS) refresh()
-  })
-
-  const groups = visibleGroups(inbox, page, query, shown)
+  const views = PAGES.map((_, p) => visibleGroups(inbox, p, query, shown))
+  const selections = views.map((groups, p) => selection(groups, cursors[p]))
+  const { list, index, current } = selections[page]
   const optional = PAGES[page].optional
-  const list = groups.flatMap((g) => g.rows)
-  const cursor = cursors[page]
-  const index = Math.min(cursor, list.length - 1)
-  const current = list[index]
+  const filtering = overlay === "filter"
 
   const setCursor = (update: number | ((c: number) => number)) =>
     setCursors((all) => all.map((c, i) => (i === page ? (typeof update === "function" ? update(c) : update) : c)))
 
+  // Each page keeps its own scroll position, so switching pages must not scroll the newly shown one.
   useEffect(() => {
     if (shownPage.current !== page) {
       shownPage.current = page
@@ -391,6 +408,7 @@ export function App({ load, open, web }: { load: () => Promise<Inbox>; open: (ur
     else if (event.scroll?.direction === "up") move(-1)
   }
 
+  // A trackpad's momentum keeps sending wheel events after a page switch. Ignore them until the gesture pauses.
   const turn = (next: number) => {
     if (next === page) return
     holdWheel.current = true
@@ -405,26 +423,26 @@ export function App({ load, open, web }: { load: () => Promise<Inbox>; open: (ur
 
   useKeyboard((key) => {
     if (key.ctrl && key.name === "c") renderer.destroy()
-    else if (filtering) {
+    else if (overlay === "filter") {
       if (key.name === "escape") {
         filter("")
-        setFiltering(false)
+        setOverlay(null)
       }
     }
-    else if (confirmWeb) {
+    else if (overlay === "confirmWeb") {
       if (key.name === "y") {
         web()
         setServing(true)
-        setConfirmWeb(false)
+        setOverlay(null)
       }
-      else if (key.name === "n" || key.name === "escape") setConfirmWeb(false)
+      else if (key.name === "n" || key.name === "escape") setOverlay(null)
     }
-    else if (help) {
-      if (key.name === "escape" || key.name === "q" || key.sequence === "?") setHelp(false)
+    else if (overlay === "help") {
+      if (key.name === "escape" || key.name === "q" || key.sequence === "?") setOverlay(null)
     }
-    else if (key.sequence === "?") setHelp(true)
+    else if (key.sequence === "?") setOverlay("help")
     else if (key.name === "escape") filter("")
-    else if (key.name === "/" || key.sequence === "/") setFiltering(true)
+    else if (key.name === "/" || key.sequence === "/") setOverlay("filter")
     else if (key.name === "q") renderer.destroy()
     else if (key.name === "j" || key.name === "down") move(1)
     else if (key.name === "k" || key.name === "up") move(-1)
@@ -438,7 +456,7 @@ export function App({ load, open, web }: { load: () => Promise<Inbox>; open: (ur
       if (!next.delete(optional.id)) next.add(optional.id)
       return next
     })
-    else if (key.shift && key.name === "w") serving ? web() : setConfirmWeb(true)
+    else if (key.shift && key.name === "w") serving ? web() : setOverlay("confirmWeb")
     else if ((key.name === "o" || key.name === "return") && current) open(current.url)
     else if (key.name === "f" && current) open(`${current.url}/files`)
   })
@@ -473,8 +491,8 @@ export function App({ load, open, web }: { load: () => Promise<Inbox>; open: (ur
         <scrollbox key={p} ref={(el) => { scrolls.current[p] = el }} visible={p === page} flexGrow={1} flexShrink={1} minHeight={0}
           marginTop={1} verticalScrollbarOptions={{ visible: false }}>
           <box flexDirection="column" onMouseScroll={wheel}>
-            <PageView inbox={inbox} page={p} query={query} shown={shown} width={width} loading={loading} frame={frame}
-              selected={selectedKey(inbox, p, query, shown, cursors[p])} />
+            <PageView inbox={inbox} page={p} groups={views[p]} query={query} shown={shown} width={width} loading={loading}
+              frame={frame} selected={selections[p].current?.key} />
           </box>
         </scrollbox>
       ))}
@@ -485,7 +503,7 @@ export function App({ load, open, web }: { load: () => Promise<Inbox>; open: (ur
           {filtering ? (
             <input flexGrow={1} focused value={query} placeholder="title, repo, #number or author"
               placeholderColor={C.muted} textColor={C.fg} focusedTextColor={C.fg} onInput={filter}
-              onSubmit={() => setFiltering(false)} />
+              onSubmit={() => setOverlay(null)} />
           ) : (
             <text flexGrow={1} fg={C.accent}>{query}</text>
           )}
@@ -504,8 +522,8 @@ export function App({ load, open, web }: { load: () => Promise<Inbox>; open: (ur
           ))}
         </text>
       )}
-      {help ? <Help screen={{ width, height }} /> : null}
-      {confirmWeb ? <ConfirmWeb screen={{ width, height }} /> : null}
+      {overlay === "help" ? <Help screen={{ width, height }} /> : null}
+      {overlay === "confirmWeb" ? <ConfirmWeb screen={{ width, height }} /> : null}
     </box>
   )
 }

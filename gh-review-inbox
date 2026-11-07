@@ -49,6 +49,10 @@ query($q: String!, $endCursor: String) {
 VIEWER = "{ viewer { login organizations(first: 100) { nodes { login } } } }"
 
 
+def login_of(actor):
+    return (actor or {}).get("login")
+
+
 def graphql(query, **variables):
     args = ["gh", "api", "graphql", "-f", f"query={query}"]
     for key, value in variables.items():
@@ -71,8 +75,9 @@ def search(q, query=SEARCH):
 
 
 def pending_by(login, owners):
+    """Search can't see pending reviews, so scan every open PR under these owners for one by login."""
     hits = search(f"{OPEN} {' '.join(owners)}", SCAN)
-    ids = [pr["id"] for pr in hits if any((r["author"] or {}).get("login") == login for r in pr["reviews"]["nodes"])]
+    ids = [pr["id"] for pr in hits if any(login_of(r["author"]) == login for r in pr["reviews"]["nodes"])]
     if not ids:
         return []
     return graphql(PR_FIELDS + "query { nodes(ids: %s) { ...pr } }" % json.dumps(ids))["nodes"]
@@ -80,16 +85,16 @@ def pending_by(login, owners):
 
 def row(pr, login):
     rollup = (pr["commits"]["nodes"] or [{}])[0].get("commit", {}).get("statusCheckRollup")
-    mine = [r for r in pr["reviews"]["nodes"] if (r["author"] or {}).get("login") == login]
-    others = {(r["author"] or {}).get("login") for r in pr["latestReviews"]["nodes"]} - {login, pr["author"] and pr["author"]["login"]}
-    opinion = next((r["state"] for r in pr["latestOpinionatedReviews"]["nodes"] if (r["author"] or {}).get("login") == login), None)
+    mine = [r for r in pr["reviews"]["nodes"] if login_of(r["author"]) == login]
+    others = {login_of(r["author"]) for r in pr["latestReviews"]["nodes"]} - {login, login_of(pr["author"])}
+    opinion = next((r["state"] for r in pr["latestOpinionatedReviews"]["nodes"] if login_of(r["author"]) == login), None)
     return {
         "key": f'{pr["repository"]["nameWithOwner"]}#{pr["number"]}',
         "repo": pr["repository"]["nameWithOwner"],
         "number": pr["number"],
         "title": pr["title"],
         "url": pr["url"],
-        "author": (pr["author"] or {}).get("login", "ghost"),
+        "author": login_of(pr["author"]) or "ghost",
         "isDraft": pr["isDraft"],
         "updatedAt": pr["updatedAt"],
         "additions": pr["additions"],
@@ -118,37 +123,47 @@ def inbox():
         found["scan"] = scan.result()
 
     rows = {name: [row(pr, login) for pr in prs] for name, prs in found.items()}
-    pending = [r for r in rows["scan"] + rows["requested"] + rows["reviewed"] if r["pendingComments"] is not None]
-    pending = list({r["key"]: r for r in pending}.values())
-    seen = {r["key"] for r in pending}
-    requested = [r for r in rows["requested"] if r["key"] not in seen]
-    seen |= {r["key"] for r in requested}
-    reviewed = [r for r in rows["reviewed"] if r["key"] not in seen and r["yourReview"] != "APPROVED"]
-    approved = [r for r in rows["reviewed"] if r["key"] not in seen and r["yourReview"] == "APPROVED"]
-
-    by_recent = lambda r: r["pendingUpdatedAt"] or r["updatedAt"]
-    mine = {"mineDraft": [], "mineWaiting": [], "mineInReview": [], "mineApproved": []}
-    for r in rows["mine"]:
-        if r["isDraft"]:
-            mine["mineDraft"].append(r)
-        elif r["reviewDecision"] == "APPROVED":
-            mine["mineApproved"].append(r)
-        elif r["reviewers"]:
-            mine["mineInReview"].append(r)
-        else:
-            mine["mineWaiting"].append(r)
     return {
         "login": login,
         "owners": [o.split(":", 1)[1] for o in owners],
         "fetchedAt": datetime.now(timezone.utc).isoformat(),
-        "groups": {
-            "pending": sorted(pending, key=by_recent, reverse=True),
-            "requested": sorted(requested, key=by_recent, reverse=True),
-            "reviewed": sorted(reviewed, key=by_recent, reverse=True),
-            "approved": sorted(approved, key=by_recent, reverse=True),
-            **{name: sorted(prs, key=by_recent, reverse=True) for name, prs in mine.items()},
-        },
+        "groups": {name: sorted(prs, key=recency, reverse=True) for name, prs in groups(rows).items()},
     }
+
+
+def recency(r):
+    return r["pendingUpdatedAt"] or r["updatedAt"]
+
+
+def groups(rows):
+    """Each PR lands in the first reviewing group that claims it: pending, then requested, then reviewed or approved."""
+    pending = {r["key"]: r for r in rows["scan"] + rows["requested"] + rows["reviewed"] if r["pendingComments"] is not None}
+    requested = [r for r in rows["requested"] if r["key"] not in pending]
+    claimed = pending.keys() | {r["key"] for r in requested}
+    reviewed = [r for r in rows["reviewed"] if r["key"] not in claimed]
+    result = {
+        "pending": list(pending.values()),
+        "requested": requested,
+        "reviewed": [r for r in reviewed if r["yourReview"] != "APPROVED"],
+        "approved": [r for r in reviewed if r["yourReview"] == "APPROVED"],
+        "mineDraft": [],
+        "mineWaiting": [],
+        "mineInReview": [],
+        "mineApproved": [],
+    }
+    for r in rows["mine"]:
+        result[your_group(r)].append(r)
+    return result
+
+
+def your_group(r):
+    if r["isDraft"]:
+        return "mineDraft"
+    if r["reviewDecision"] == "APPROVED":
+        return "mineApproved"
+    if r["reviewers"]:
+        return "mineInReview"
+    return "mineWaiting"
 
 
 class Handler(BaseHTTPRequestHandler):
