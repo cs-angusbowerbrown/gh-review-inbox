@@ -22,8 +22,13 @@ function web() {
   servers.push(Bun.spawn([script, "web"], { stdin: "ignore", stdout: "ignore", stderr: "ignore" }))
 }
 
-process.on("exit", () => servers.forEach((server) => server.kill()))
+process.stdout.write("\x1b[22;2t")
+process.on("exit", () => {
+  servers.forEach((server) => server.kill())
+  process.stdout.write("\x1b[23;2t")
+})
 
 const renderer = await createCliRenderer({ exitOnCtrlC: false })
+renderer.setTerminalTitle("Review inbox")
 renderer.on("destroy", () => process.exit(0))
 createRoot(renderer).render(<App load={load} open={open} web={web} />)
