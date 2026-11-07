@@ -107,6 +107,7 @@ function footer(optional: Optional, shown: boolean, count: number, width: number
 const CHECK_COLOR = { SUCCESS: C.green, FAILURE: C.red, ERROR: C.red, PENDING: C.amber, EXPECTED: C.amber }
 
 const STALE_MS = 30_000
+const WHEEL_GESTURE_GAP_MS = 150
 
 function ago(iso: string) {
   const s = (Date.now() - new Date(iso).getTime()) / 1000
@@ -269,14 +270,48 @@ function PrRow({ row, selected, query, group }: { row: Row; selected: boolean; q
   )
 }
 
+function selectedKey(inbox: Inbox | null, page: number, query: string, shown: Set<GroupId>, cursor: number) {
+  const list = visibleGroups(inbox, page, query, shown).flatMap((g) => g.rows)
+  return list[Math.min(cursor, list.length - 1)]?.key
+}
+
+function PageView({ inbox, page, query, shown, width, loading, frame, selected }: {
+  inbox: Inbox | null; page: number; query: string; shown: Set<GroupId>; width: number; loading: boolean; frame: number; selected?: string
+}) {
+  const optional = PAGES[page].optional
+  if (!inbox) return loading ? <Skeleton groups={PAGES[page].groups.filter((g) => g.id !== optional.id)} frame={frame} width={width} /> : null
+  const groups = visibleGroups(inbox, page, query, shown)
+  if (!groups.length) return <text fg={C.muted} paddingLeft={1}>{`No pull requests match "${query}".`}</text>
+  return (
+    <>
+      {groups.map((g) => {
+        const hidden = g.id === optional.notice && !shown.has(optional.id) ? inbox.groups[optional.id].length : 0
+        const toggle = g.id === optional.id ? `${optional.key} to hide` : hidden ? `${hidden} ${optional.noun} hidden, ${optional.key} to show` : ""
+        const parts = [`${g.title} (${g.rows.length})`, toggle, g.hint].filter(Boolean)
+        return (
+          <box key={g.id} flexDirection="column" marginBottom={1} border borderStyle="rounded" borderColor={C.border}
+            title={fit(parts, width - 6)}>
+            {g.rows.length
+              ? g.rows.map((row) => <PrRow key={row.key} row={row} query={query} group={g} selected={row.key === selected} />)
+              : <text fg={C.muted} paddingLeft={1}>Nothing here.</text>}
+          </box>
+        )
+      })}
+    </>
+  )
+}
+
 export function App({ load, open, web }: { load: () => Promise<Inbox>; open: (url: string) => void; web: () => void }) {
   const renderer = useRenderer()
   const { width, height } = useTerminalDimensions()
-  const scroll = useRef<ScrollBoxRenderable>(null)
+  const scrolls = useRef<(ScrollBoxRenderable | null)[]>([])
+  const shownPage = useRef(0)
+  const lastWheel = useRef(0)
+  const holdWheel = useRef(false)
   const [inbox, setInbox] = useState<Inbox | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
-  const [cursor, setCursor] = useState(0)
+  const [cursors, setCursors] = useState(PAGES.map(() => 0))
   const [query, setQuery] = useState("")
   const [filtering, setFiltering] = useState(false)
   const [help, setHelp] = useState(false)
@@ -324,32 +359,48 @@ export function App({ load, open, web }: { load: () => Promise<Inbox>; open: (ur
   const groups = visibleGroups(inbox, page, query, shown)
   const optional = PAGES[page].optional
   const list = groups.flatMap((g) => g.rows)
+  const cursor = cursors[page]
   const index = Math.min(cursor, list.length - 1)
   const current = list[index]
 
+  const setCursor = (update: number | ((c: number) => number)) =>
+    setCursors((all) => all.map((c, i) => (i === page ? (typeof update === "function" ? update(c) : update) : c)))
+
   useEffect(() => {
-    if (!current) return
-    if (index === 0) scroll.current?.scrollTo(0)
-    else if (index === list.length - 1) scroll.current?.scrollTo(Infinity)
-    else scroll.current?.scrollChildIntoView(current.key, { align: "nearest", inset: 1 })
-  }, [current?.key])
+    if (shownPage.current !== page) {
+      shownPage.current = page
+      return
+    }
+    const box = scrolls.current[page]
+    if (!current || !box) return
+    if (index === 0) box.scrollTo(0)
+    else if (index === list.length - 1) box.scrollTo(Infinity)
+    else box.scrollChildIntoView(current.key, { align: "nearest", inset: 1 })
+  }, [current?.key, page])
 
   const move = (delta: number) => setCursor((c) => Math.max(0, Math.min(c + delta, list.length - 1)))
 
   const wheel = (event: MouseEvent) => {
     event.stopPropagation()
+    const now = Date.now()
+    const gap = now - lastWheel.current
+    lastWheel.current = now
+    if (holdWheel.current && gap < WHEEL_GESTURE_GAP_MS) return
+    holdWheel.current = false
     if (event.scroll?.direction === "down") move(1)
     else if (event.scroll?.direction === "up") move(-1)
   }
 
   const turn = (next: number) => {
+    if (next === page) return
+    holdWheel.current = true
     setPage(next)
-    setCursor(0)
   }
 
   const filter = (value: string) => {
     setQuery(value)
-    setCursor(0)
+    setCursors(PAGES.map(() => 0))
+    scrolls.current.forEach((box) => box?.scrollTo(0))
   }
 
   useKeyboard((key) => {
@@ -400,7 +451,7 @@ export function App({ load, open, web }: { load: () => Promise<Inbox>; open: (ur
     : inbox ? `${inbox.login} · ${ago(inbox.fetchedAt)}` : ""
 
   return (
-    <box flexDirection="column" height={height} padding={1}>
+    <box flexDirection="column" height={height} padding={1} onMouseScroll={wheel}>
       <box flexDirection="row" justifyContent="space-between" paddingLeft={1} paddingRight={1} flexShrink={0}>
         <text wrapMode="none">
           {PAGES.map((p, i) => (
@@ -418,29 +469,15 @@ export function App({ load, open, web }: { load: () => Promise<Inbox>; open: (ur
         </text>
       </box>
       {error ? <text fg={C.red} paddingLeft={1}>{error}</text> : null}
-      <scrollbox ref={scroll} flexGrow={1} flexShrink={1} minHeight={0} marginTop={1} verticalScrollbarOptions={{ visible: false }}>
-        <box flexDirection="column" onMouseScroll={wheel}>
-        {inbox && !groups.length ? <text fg={C.muted} paddingLeft={1}>{`No pull requests match "${query}".`}</text> : null}
-        {inbox
-          ? groups.map((g) => {
-              const rows = g.rows
-              const hidden = g.id === optional.notice && !shown.has(optional.id) ? inbox.groups[optional.id].length : 0
-              const toggle = g.id === optional.id ? `${optional.key} to hide` : hidden ? `${hidden} ${optional.noun} hidden, ${optional.key} to show` : ""
-              const parts = [`${g.title} (${rows.length})`, toggle, g.hint].filter(Boolean)
-              return (
-                <box key={g.id} flexDirection="column" marginBottom={1} border borderStyle="rounded" borderColor={C.border}
-                  title={fit(parts, width - 6)}>
-                  {rows.length
-                    ? rows.map((row) => <PrRow key={row.key} row={row} query={query} group={g} selected={row.key === current?.key} />)
-                    : <text fg={C.muted} paddingLeft={1}>Nothing here.</text>}
-                </box>
-              )
-            })
-          : loading
-            ? <Skeleton groups={PAGES[page].groups.filter((g) => g.id !== optional.id)} frame={frame} width={width} />
-            : null}
-        </box>
-      </scrollbox>
+      {PAGES.map((_, p) => (
+        <scrollbox key={p} ref={(el) => { scrolls.current[p] = el }} visible={p === page} flexGrow={1} flexShrink={1} minHeight={0}
+          marginTop={1} verticalScrollbarOptions={{ visible: false }}>
+          <box flexDirection="column" onMouseScroll={wheel}>
+            <PageView inbox={inbox} page={p} query={query} shown={shown} width={width} loading={loading} frame={frame}
+              selected={selectedKey(inbox, p, query, shown, cursors[p])} />
+          </box>
+        </scrollbox>
+      ))}
       {filtering || query ? (
         <box flexShrink={0} border borderStyle="rounded" borderColor={filtering ? C.accent : C.border} flexDirection="row"
           paddingLeft={1} paddingRight={1} gap={1} title={filtering ? " filter " : undefined}>
