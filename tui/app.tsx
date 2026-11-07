@@ -14,12 +14,13 @@ export type Row = {
   additions: number
   deletions: number
   reviewDecision: "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | null
+  yourReview: "APPROVED" | "CHANGES_REQUESTED" | "DISMISSED" | null
   checks: "SUCCESS" | "FAILURE" | "ERROR" | "PENDING" | "EXPECTED" | null
   draftComments: number | null
   draftUpdatedAt: string | null
 }
 
-export type GroupId = "drafts" | "requested" | "reviewed" | "mine"
+export type GroupId = "drafts" | "requested" | "reviewed" | "approved" | "mineDraft" | "mineWaiting" | "mineInReview" | "mineApproved"
 
 export type Inbox = {
   login: string
@@ -28,12 +29,36 @@ export type Inbox = {
   groups: Record<GroupId, Row[]>
 }
 
-const GROUPS: { id: GroupId; title: string; hint: string }[] = [
-  { id: "drafts", title: "Drafts", hint: "started, not submitted" },
-  { id: "requested", title: "Requested from you", hint: "not started" },
-  { id: "reviewed", title: "Reviewed, still open", hint: "review submitted" },
-  { id: "mine", title: "Your pull requests", hint: "" },
+type Group = { id: GroupId; title: string; hint: string; quiet?: boolean; decided?: boolean }
+
+type Optional = { id: GroupId; key: string; noun: string; notice: GroupId }
+
+const PAGES: { title: string; groups: Group[]; optional: Optional }[] = [
+  {
+    title: "Reviewing",
+    optional: { id: "approved", key: "a", noun: "approved", notice: "reviewed" },
+    groups: [
+      { id: "drafts", title: "Drafts", hint: "started, not submitted" },
+      { id: "requested", title: "Requested from you", hint: "not started" },
+      { id: "reviewed", title: "Reviewed, still open", hint: "not approved by you" },
+      { id: "approved", title: "Approved by you", hint: "still open", quiet: true, decided: true },
+    ],
+  },
+  {
+    title: "Yours",
+    optional: { id: "mineDraft", key: "d", noun: "drafts", notice: "mineWaiting" },
+    groups: [
+      { id: "mineDraft", title: "Draft", hint: "not ready for review" },
+      { id: "mineWaiting", title: "Waiting for review", hint: "no reviews yet" },
+      { id: "mineInReview", title: "In review", hint: "reviews in, not approved" },
+      { id: "mineApproved", title: "Approved", hint: "ready to merge", decided: true },
+    ],
+  },
 ]
+
+function pageCount(inbox: Inbox, page: number) {
+  return PAGES[page].groups.filter((g) => g.id !== PAGES[page].optional.id).reduce((sum, g) => sum + inbox.groups[g.id].length, 0)
+}
 
 const C = {
   fg: "#f0f6fc",
@@ -47,13 +72,16 @@ const C = {
   match: "#5c4813",
 }
 
-const KEYS: { key: string; label: string; footer?: string }[] = [
-  { key: "j / k", label: "move down / up", footer: "move" },
+const KEYS: { key: string; label: string; footer?: string; footerKey?: string }[] = [
+  { key: "j / k", label: "move down / up", footer: "move", footerKey: "j/k" },
   { key: "↓ / ↑ / wheel", label: "move down / up" },
   { key: "g / G", label: "jump to top / bottom" },
+  { key: "1 / 2 / tab", label: "reviewing / your pull requests", footer: "pages", footerKey: "1/2" },
   { key: "o / enter", label: "open pull request", footer: "open" },
   { key: "f", label: "open files changed", footer: "files" },
   { key: "W", label: "start and open the web view" },
+  { key: "a", label: "show / hide PRs you've approved" },
+  { key: "d", label: "show / hide your draft PRs" },
   { key: "/", label: "filter by title, repo or author", footer: "filter" },
   { key: "esc", label: "clear filter" },
   { key: "r", label: "refresh", footer: "refresh" },
@@ -61,7 +89,20 @@ const KEYS: { key: string; label: string; footer?: string }[] = [
   { key: "q", label: "quit", footer: "quit" },
 ]
 
-const FOOTER = KEYS.filter((k) => k.footer).map((k) => [k.key.split(" ")[0], k.footer!])
+const FOOTER = KEYS.filter((k) => k.footer).map((k) => [k.footerKey ?? k.key.split(" ")[0], k.footer!])
+
+const FOOTER_DROP_ORDER = ["r", "f", "/", "j/k", "1/2", "a", "d"]
+
+function footer(optional: Optional, shown: boolean, count: number, width: number) {
+  const toggle = [optional.key, `${shown ? "hide" : "show"} ${optional.noun}`]
+  let items = count ? [...FOOTER.slice(0, 4), toggle, ...FOOTER.slice(4)] : FOOTER
+  const length = () => items.reduce((sum, [key, label]) => sum + key.length + label.length + 3, -2)
+  for (const key of FOOTER_DROP_ORDER) {
+    if (length() <= width) break
+    items = items.filter(([k]) => k !== key)
+  }
+  return items
+}
 
 const CHECK_COLOR = { SUCCESS: C.green, FAILURE: C.red, ERROR: C.red, PENDING: C.amber, EXPECTED: C.amber }
 
@@ -80,10 +121,19 @@ function matches(row: Row, query: string) {
   return [row.title, `${row.repo}#${row.number}`, row.author].some((field) => field.toLowerCase().includes(needle))
 }
 
-function visibleGroups(inbox: Inbox | null, query: string) {
+function visibleGroups(inbox: Inbox | null, page: number, query: string, shown: Set<GroupId>) {
   if (!inbox) return []
-  return GROUPS.map((g) => ({ ...g, rows: inbox.groups[g.id].filter((row) => matches(row, query)) }))
+  return PAGES[page].groups.filter((g) => shown.has(g.id) || g.id !== PAGES[page].optional.id)
+    .map((g) => ({ ...g, rows: inbox.groups[g.id].filter((row) => matches(row, query)) }))
     .filter((g) => !query || g.rows.length)
+}
+
+function fit(parts: string[], width: number) {
+  for (let n = parts.length; n > 1; n--) {
+    const title = ` ${parts.slice(0, n).join(" · ")} `
+    if (title.length <= width) return title
+  }
+  return ` ${parts[0]} `.slice(0, width)
 }
 
 function Highlighted({ text, query }: { text: string; query: string }) {
@@ -142,18 +192,18 @@ function ConfirmWeb({ screen }: { screen: { width: number; height: number } }) {
   )
 }
 
-function PrRow({ row, selected, query }: { row: Row; selected: boolean; query: string }) {
+function PrRow({ row, selected, query, group }: { row: Row; selected: boolean; query: string; group: Group }) {
   const when = row.draftUpdatedAt ? `draft updated ${ago(row.draftUpdatedAt)}` : `updated ${ago(row.updatedAt)}`
   return (
     <box id={row.key} paddingLeft={1} paddingRight={1} backgroundColor={selected ? C.selected : undefined}>
       <box flexDirection="row" justifyContent="space-between" gap={2}>
-        <text fg={selected ? C.accent : C.fg} flexShrink={1} wrapMode="none" truncate>
+        <text fg={selected ? C.accent : group.quiet ? C.muted : C.fg} flexShrink={1} wrapMode="none" truncate>
           <span fg={row.isDraft ? C.muted : C.green}>{row.isDraft ? "◌ " : "● "}</span>
           <strong><Highlighted text={row.title} query={query} /></strong>
         </text>
         <text flexShrink={0}>
           {row.draftComments !== null ? <span fg={C.accent}>{`${row.draftComments} draft  `}</span> : null}
-          {row.reviewDecision === "APPROVED" ? <span fg={C.green}>approved  </span> : null}
+          {row.reviewDecision === "APPROVED" && !group.decided ? <span fg={C.green}>approved  </span> : null}
           {row.reviewDecision === "CHANGES_REQUESTED" ? <span fg={C.red}>changes requested  </span> : null}
           <span fg={C.green}>{`+${row.additions} `}</span>
           <span fg={C.red}>{`-${row.deletions}`}</span>
@@ -163,8 +213,7 @@ function PrRow({ row, selected, query }: { row: Row; selected: boolean; query: s
       <text fg={C.muted} wrapMode="none" truncate>
         {"  "}
         <Highlighted text={`${row.repo}#${row.number}`} query={query} />
-        {" · "}
-        <Highlighted text={row.author} query={query} />
+        {group.id.startsWith("mine") ? null : <>{" · "}<Highlighted text={row.author} query={query} /></>}
         {` · ${when}`}
       </text>
     </box>
@@ -184,6 +233,8 @@ export function App({ load, open, web }: { load: () => Promise<Inbox>; open: (ur
   const [help, setHelp] = useState(false)
   const [confirmWeb, setConfirmWeb] = useState(false)
   const [serving, setServing] = useState(false)
+  const [shown, setShown] = useState<Set<GroupId>>(new Set())
+  const [page, setPage] = useState(0)
   const [, tick] = useState(0)
   const inFlight = useRef(false)
   const lastFetch = useRef(0)
@@ -214,7 +265,8 @@ export function App({ load, open, web }: { load: () => Promise<Inbox>; open: (ur
     if (Date.now() - lastFetch.current > STALE_MS) refresh()
   })
 
-  const groups = visibleGroups(inbox, query)
+  const groups = visibleGroups(inbox, page, query, shown)
+  const optional = PAGES[page].optional
   const list = groups.flatMap((g) => g.rows)
   const index = Math.min(cursor, list.length - 1)
   const current = list[index]
@@ -232,6 +284,11 @@ export function App({ load, open, web }: { load: () => Promise<Inbox>; open: (ur
     event.stopPropagation()
     if (event.scroll?.direction === "down") move(1)
     else if (event.scroll?.direction === "up") move(-1)
+  }
+
+  const turn = (next: number) => {
+    setPage(next)
+    setCursor(0)
   }
 
   const filter = (value: string) => {
@@ -267,10 +324,19 @@ export function App({ load, open, web }: { load: () => Promise<Inbox>; open: (ur
     else if (key.name === "G" || (key.shift && key.name === "g")) setCursor(list.length - 1)
     else if (key.name === "g") setCursor(0)
     else if (key.name === "r") refresh()
+    else if (key.name === "1" || key.name === "2") turn(Number(key.name) - 1)
+    else if (key.name === "tab") turn((page + 1) % PAGES.length)
+    else if (key.name === optional.key && !key.shift) setShown((set) => {
+      const next = new Set(set)
+      if (!next.delete(optional.id)) next.add(optional.id)
+      return next
+    })
     else if (key.shift && key.name === "w") serving ? web() : setConfirmWeb(true)
     else if ((key.name === "o" || key.name === "return") && current) open(current.url)
     else if (key.name === "f" && current) open(`${current.url}/files`)
   })
+
+  const footerItems = footer(optional, shown.has(optional.id), inbox?.groups[optional.id].length ?? 0, width - 3)
 
   const status = loading
     ? inbox ? `refreshing… (last ${ago(inbox.fetchedAt)})` : "loading…"
@@ -279,7 +345,15 @@ export function App({ load, open, web }: { load: () => Promise<Inbox>; open: (ur
   return (
     <box flexDirection="column" height={height} padding={1}>
       <box flexDirection="row" justifyContent="space-between" paddingLeft={1} paddingRight={1} flexShrink={0}>
-        <text fg={C.fg}><strong>Review inbox</strong></text>
+        <text wrapMode="none">
+          {PAGES.map((p, i) => (
+            <span key={p.title}>
+              <span fg={i === page ? C.accent : C.muted}>{`[${i + 1}] `}</span>
+              {i === page ? <span fg={C.fg}><strong><u>{p.title}</u></strong></span> : <span fg={C.muted}>{p.title}</span>}
+              <span fg={C.muted}>{inbox ? ` (${pageCount(inbox, i)})` : ""}{i < PAGES.length - 1 ? "   " : ""}</span>
+            </span>
+          ))}
+        </text>
         <text fg={C.muted}>
           {list.length ? <span fg={C.fg}>{`${index + 1}/${list.length}  `}</span> : null}
           {status}
@@ -292,11 +366,14 @@ export function App({ load, open, web }: { load: () => Promise<Inbox>; open: (ur
         {inbox
           ? groups.map((g) => {
               const rows = g.rows
+              const hidden = g.id === optional.notice && !shown.has(optional.id) ? inbox.groups[optional.id].length : 0
+              const toggle = g.id === optional.id ? `${optional.key} to hide` : hidden ? `${hidden} ${optional.noun} hidden, ${optional.key} to show` : ""
+              const parts = [`${g.title} (${rows.length})`, toggle, g.hint].filter(Boolean)
               return (
                 <box key={g.id} flexDirection="column" marginBottom={1} border borderStyle="rounded" borderColor={C.border}
-                  title={` ${g.title} (${rows.length})${g.hint ? ` · ${g.hint}` : ""} `}>
+                  title={fit(parts, width - 6)}>
                   {rows.length
-                    ? rows.map((row) => <PrRow key={row.key} row={row} query={query} selected={row.key === current?.key} />)
+                    ? rows.map((row) => <PrRow key={row.key} row={row} query={query} group={g} selected={row.key === current?.key} />)
                     : <text fg={C.muted} paddingLeft={1}>Nothing here.</text>}
                 </box>
               )
@@ -322,10 +399,10 @@ export function App({ load, open, web }: { load: () => Promise<Inbox>; open: (ur
         </box>
       ) : (
         <text paddingLeft={1} flexShrink={0} wrapMode="none" truncate>
-          {FOOTER.map(([key, label], i) => (
+          {footerItems.map(([key, label], i) => (
             <span key={key}>
               <span fg={C.fg}>{key}</span>
-              <span fg={C.muted}>{` ${label}${i < FOOTER.length - 1 ? "  " : ""}`}</span>
+              <span fg={C.muted}>{` ${label}${i < footerItems.length - 1 ? "  " : ""}`}</span>
             </span>
           ))}
         </text>

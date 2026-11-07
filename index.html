@@ -39,7 +39,18 @@
     border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px;
   }
   .count { font-size: 12px; font-weight: 500; background: var(--border); border-radius: 2em; padding: 0 7px; }
+  nav { display: flex; gap: 8px; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+  nav a {
+    padding: 8px 12px; color: var(--muted); text-decoration: none; border-bottom: 2px solid transparent; margin-bottom: -1px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  nav a:hover { color: var(--fg); }
+  nav a[aria-current] { color: var(--fg); font-weight: 600; border-bottom-color: #fd8c73; }
+  nav kbd { font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
   .hint { color: var(--muted); font-weight: 400; font-size: 12px; }
+  section > h2 .toggle { margin-left: auto; font-weight: 400; color: var(--muted); }
+  section > h2 .toggle:hover { color: var(--accent); }
+  section.quiet .title { font-weight: 500; color: var(--muted); }
   .empty { padding: 16px; color: var(--muted); }
   a.row {
     display: grid; grid-template-columns: 16px 1fr auto; gap: 4px 10px; align-items: start;
@@ -74,16 +85,36 @@
     <span class="status" id="status">Loading…</span>
     <button id="refresh">Refresh</button>
   </header>
+  <nav id="tabs"></nav>
   <div id="error"></div>
   <div id="groups"></div>
 </main>
 <script>
-  const GROUPS = [
-    { id: "drafts", title: "Drafts", hint: "Reviews you've started but not submitted", link: "files" },
-    { id: "requested", title: "Requested from you", hint: "Not started yet", link: "files" },
-    { id: "reviewed", title: "Reviewed, still open", hint: "You've submitted a review", link: "files" },
-    { id: "mine", title: "Your pull requests", hint: "", link: "" },
+  const PAGES = [
+    {
+      id: "reviewing", title: "Reviewing",
+      optional: { id: "approved", noun: "approved by you", notice: "reviewed" },
+      groups: [
+        { id: "drafts", title: "Drafts", hint: "Reviews you've started but not submitted", link: "files" },
+        { id: "requested", title: "Requested from you", hint: "Not started yet", link: "files" },
+        { id: "reviewed", title: "Reviewed, still open", hint: "You've reviewed but not approved", link: "files" },
+        { id: "approved", title: "Approved by you", hint: "Still open", link: "files", quiet: true, decided: true },
+      ],
+    },
+    {
+      id: "yours", title: "Yours",
+      optional: { id: "mineDraft", noun: "drafts", notice: "mineWaiting" },
+      groups: [
+        { id: "mineDraft", title: "Draft", hint: "Not ready for review", link: "", mine: true },
+        { id: "mineWaiting", title: "Waiting for review", hint: "No reviews yet", link: "", mine: true },
+        { id: "mineInReview", title: "In review", hint: "Reviews in, not approved", link: "", mine: true },
+        { id: "mineApproved", title: "Approved", hint: "Ready to merge", link: "", mine: true, decided: true },
+      ],
+    },
   ];
+
+  const pageIndex = () => Math.max(0, PAGES.findIndex((p) => `#${p.id}` === location.hash));
+  const pageCount = (data, page) => page.groups.filter((g) => g.id !== page.optional.id).reduce((sum, g) => sum + data.groups[g.id].length, 0);
 
   const OPEN_ICON = '<svg class="icon" width="16" height="16" viewBox="0 0 16 16" fill="var(--green)"><path d="M1.5 3.25a2.25 2.25 0 1 1 3 2.122v5.256a2.251 2.251 0 1 1-1.5 0V5.372A2.25 2.25 0 0 1 1.5 3.25Zm5.677-.177L9.573.677A.25.25 0 0 1 10 .854V2.5h1A2.5 2.5 0 0 1 13.5 5v5.628a2.251 2.251 0 1 1-1.5 0V5a1 1 0 0 0-1-1h-1v1.646a.25.25 0 0 1-.427.177L7.177 3.427a.25.25 0 0 1 0-.354ZM3.75 2.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm0 9.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm8.25.75a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Z"/></svg>';
   const DRAFT_ICON = '<svg class="icon" width="16" height="16" viewBox="0 0 16 16" fill="var(--muted)"><path d="M3.25 1A2.25 2.25 0 0 1 4 5.372v5.256a2.251 2.251 0 1 1-1.5 0V5.372A2.251 2.251 0 0 1 3.25 1Zm9.5 14a2.25 2.25 0 1 1 0-4.5 2.25 2.25 0 0 1 0 4.5ZM2.5 3.25a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0ZM3.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm9.5 0a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM14 7.5a1.25 1.25 0 1 1-2.5 0 1.25 1.25 0 0 1 2.5 0Zm0-4.25a1.25 1.25 0 1 1-2.5 0 1.25 1.25 0 0 1 2.5 0Z"/></svg>';
@@ -105,32 +136,47 @@
     return "just now";
   }
 
-  function side(pr) {
+  function side(pr, decided) {
     const parts = [];
     if (pr.draftComments !== null) parts.push(`<span class="badge">${pr.draftComments} draft comment${pr.draftComments === 1 ? "" : "s"}</span>`);
-    if (pr.reviewDecision === "APPROVED") parts.push('<span class="label approved">Approved</span>');
+    if (pr.reviewDecision === "APPROVED" && !decided) parts.push('<span class="label approved">Approved</span>');
     if (pr.reviewDecision === "CHANGES_REQUESTED") parts.push('<span class="label changes">Changes requested</span>');
     parts.push(`<span><span class="add">+${pr.additions}</span> <span class="del">−${pr.deletions}</span></span>`);
     if (pr.checks) parts.push(`<span class="dot ${pr.checks}" title="Checks: ${pr.checks.toLowerCase()}"></span>`);
     return parts.join("");
   }
 
-  function rowHtml(pr, link) {
-    const href = link ? `${pr.url}/${link}` : pr.url;
+  function rowHtml(pr, g) {
+    const href = g.link ? `${pr.url}/${g.link}` : pr.url;
     const when = pr.draftUpdatedAt ? `draft updated ${ago(pr.draftUpdatedAt)}` : `updated ${ago(pr.updatedAt)}`;
     return `<a class="row" href="${escape(href)}" target="_blank" rel="noopener">
       ${pr.isDraft ? DRAFT_ICON : OPEN_ICON}
       <span class="title">${escape(pr.title)}</span>
-      <span class="side">${side(pr)}</span>
-      <span class="meta">${escape(pr.repo)}#${pr.number} · ${escape(pr.author)} · ${when}</span>
+      <span class="side">${side(pr, g.decided)}</span>
+      <span class="meta">${escape(pr.repo)}#${pr.number}${g.mine ? "" : ` · ${escape(pr.author)}`} · ${when}</span>
     </a>`;
   }
 
+  const shown = new Set();
+
+  function toggle(g, page, data) {
+    const { id, noun, notice } = page.optional;
+    const count = data.groups[id].length;
+    if (g.id === id) return `<button class="toggle" data-toggle="${id}">Hide</button>`;
+    if (g.id === notice && count && !shown.has(id)) return `<button class="toggle" data-toggle="${id}">Show ${count} ${noun}</button>`;
+    return "";
+  }
+
   function render(data) {
-    document.getElementById("groups").innerHTML = GROUPS.map((g) => {
+    const current = pageIndex();
+    document.getElementById("tabs").innerHTML = PAGES.map((page, i) =>
+      `<a href="#${page.id}"${i === current ? ' aria-current="page"' : ""}><kbd>${i + 1}</kbd>${page.title} <span class="count">${pageCount(data, page)}</span></a>`
+    ).join("");
+    const page = PAGES[current];
+    document.getElementById("groups").innerHTML = page.groups.filter((g) => shown.has(g.id) || g.id !== page.optional.id).map((g) => {
       const prs = data.groups[g.id];
-      const body = prs.length ? prs.map((pr) => rowHtml(pr, g.link)).join("") : '<div class="empty">Nothing here.</div>';
-      return `<section><h2>${g.title} <span class="count">${prs.length}</span><span class="hint">${g.hint}</span></h2>${body}</section>`;
+      const body = prs.length ? prs.map((pr) => rowHtml(pr, g)).join("") : '<div class="empty">Nothing here.</div>';
+      return `<section${g.quiet ? ' class="quiet"' : ""}><h2>${g.title} <span class="count">${prs.length}</span><span class="hint">${g.hint}</span>${toggle(g, page, data)}</h2>${body}</section>`;
     }).join("");
   }
 
@@ -168,6 +214,19 @@
   }
 
   button.addEventListener("click", load);
+  window.addEventListener("hashchange", () => last && render(last));
+  document.addEventListener("keydown", (event) => {
+    if (event.metaKey || event.ctrlKey || event.altKey || event.target.closest("input, textarea")) return;
+    const page = PAGES[Number(event.key) - 1];
+    if (page) location.hash = page.id;
+  });
+  document.getElementById("groups").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-toggle]");
+    if (!button) return;
+    const id = button.dataset.toggle;
+    if (!shown.delete(id)) shown.add(id);
+    if (last) render(last);
+  });
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible" && Date.now() - lastFetch > 30000) load();
   });

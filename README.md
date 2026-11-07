@@ -2,14 +2,23 @@
 
 A `gh` extension that lists the pull requests you're in the middle of, so a review you started yesterday is one click away instead of buried in notifications.
 
-It shows four groups:
+It has two pages. **Reviewing** covers other people's pull requests:
 
 | Group | What's in it |
 | --- | --- |
 | Drafts | PRs where you've written review comments but haven't submitted the review |
 | Requested from you | PRs waiting on your review that you haven't started |
-| Reviewed, still open | PRs you've submitted a review on that haven't merged |
-| Your pull requests | PRs you opened |
+| Reviewed, still open | PRs you've reviewed but not approved, that haven't merged |
+| Approved by you | PRs whose latest approve-or-request-changes review from you is an approval. Hidden until you ask for it |
+
+**Yours** covers the pull requests you opened:
+
+| Group | What's in it |
+| --- | --- |
+| Draft | Draft PRs. Hidden until you ask for it |
+| Waiting for review | Ready for review, but nobody else has reviewed yet |
+| In review | Someone has reviewed, but it isn't approved |
+| Approved | Approved and ready to merge |
 
 GitHub's own pull request pages can't show the first group. A pending review is private to you, so search qualifiers like `reviewed-by:@me` don't see it, and once you submit any review you drop out of `review-requested:@me`.
 
@@ -33,7 +42,7 @@ The page is meant to stay open in a tab. It refreshes when you come back to it, 
 
 `--port` picks another port, and `--no-open` skips opening the browser.
 
-The terminal view is built with [OpenTUI](https://opentui.com). `j`/`k` or the mouse wheel move the selection, `g`/`G` jump to the top and bottom, `o` or `enter` opens the selected PR, `f` opens its files changed, `r` refreshes and `q` quits. `?` shows every key. The header shows where you are in the list, as in `3/20`. `/` filters by title, repository, PR number or author and highlights the matches. `enter` keeps the filter while you move through them, and `esc` clears it. It also refreshes when the terminal regains focus. `W` (shift) starts and opens the web view after a `y`/`n` confirmation. A server started that way stops when the TUI quits; one already running on the port is left alone.
+The terminal view is built with [OpenTUI](https://opentui.com). `j`/`k` or the mouse wheel move the selection, `g`/`G` jump to the top and bottom, `1`/`2` (or `tab`) switch between Reviewing and Yours, `o` or `enter` opens the selected PR, `f` opens its files changed, `a` shows or hides the PRs you've approved and `d` your draft PRs (on the web page, use the button in the group heading), `r` refreshes and `q` quits. `?` shows every key. The header shows where you are in the list, as in `3/20`. `/` filters by title, repository, PR number or author and highlights the matches. `enter` keeps the filter while you move through them, and `esc` clears it. It also refreshes when the terminal regains focus. `W` (shift) starts and opens the web view after a `y`/`n` confirmation. A server started that way stops when the TUI quits; one already running on the port is left alone.
 
 ## How drafts are found
 

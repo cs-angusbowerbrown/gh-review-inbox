@@ -23,6 +23,8 @@ fragment pr on PullRequest {
   repository { nameWithOwner }
   commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
   reviews(states: PENDING, first: 10) { nodes { author { login } updatedAt comments { totalCount } } }
+  latestOpinionatedReviews(first: 50) { nodes { author { login } state } }
+  latestReviews(first: 50) { nodes { author { login } } }
 }
 """
 
@@ -79,6 +81,8 @@ def pending_by(login, owners):
 def row(pr, login):
     rollup = (pr["commits"]["nodes"] or [{}])[0].get("commit", {}).get("statusCheckRollup")
     mine = [r for r in pr["reviews"]["nodes"] if (r["author"] or {}).get("login") == login]
+    others = {(r["author"] or {}).get("login") for r in pr["latestReviews"]["nodes"]} - {login, pr["author"] and pr["author"]["login"]}
+    opinion = next((r["state"] for r in pr["latestOpinionatedReviews"]["nodes"] if (r["author"] or {}).get("login") == login), None)
     return {
         "key": f'{pr["repository"]["nameWithOwner"]}#{pr["number"]}',
         "repo": pr["repository"]["nameWithOwner"],
@@ -91,6 +95,8 @@ def row(pr, login):
         "additions": pr["additions"],
         "deletions": pr["deletions"],
         "reviewDecision": pr["reviewDecision"],
+        "yourReview": opinion,
+        "reviewers": len(others),
         "checks": rollup["state"] if rollup else None,
         "draftComments": sum(r["comments"]["totalCount"] for r in mine) if mine else None,
         "draftUpdatedAt": max(r["updatedAt"] for r in mine) if mine else None,
@@ -117,9 +123,20 @@ def inbox():
     seen = {r["key"] for r in drafts}
     requested = [r for r in rows["requested"] if r["key"] not in seen]
     seen |= {r["key"] for r in requested}
-    reviewed = [r for r in rows["reviewed"] if r["key"] not in seen]
+    reviewed = [r for r in rows["reviewed"] if r["key"] not in seen and r["yourReview"] != "APPROVED"]
+    approved = [r for r in rows["reviewed"] if r["key"] not in seen and r["yourReview"] == "APPROVED"]
 
     by_recent = lambda r: r["draftUpdatedAt"] or r["updatedAt"]
+    mine = {"mineDraft": [], "mineWaiting": [], "mineInReview": [], "mineApproved": []}
+    for r in rows["mine"]:
+        if r["isDraft"]:
+            mine["mineDraft"].append(r)
+        elif r["reviewDecision"] == "APPROVED":
+            mine["mineApproved"].append(r)
+        elif r["reviewers"]:
+            mine["mineInReview"].append(r)
+        else:
+            mine["mineWaiting"].append(r)
     return {
         "login": login,
         "owners": [o.split(":", 1)[1] for o in owners],
@@ -128,7 +145,8 @@ def inbox():
             "drafts": sorted(drafts, key=by_recent, reverse=True),
             "requested": sorted(requested, key=by_recent, reverse=True),
             "reviewed": sorted(reviewed, key=by_recent, reverse=True),
-            "mine": sorted(rows["mine"], key=by_recent, reverse=True),
+            "approved": sorted(approved, key=by_recent, reverse=True),
+            **{name: sorted(prs, key=by_recent, reverse=True) for name, prs in mine.items()},
         },
     }
 
