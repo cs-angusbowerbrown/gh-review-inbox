@@ -95,7 +95,7 @@
       id: "reviewing", title: "Reviewing",
       optional: { id: "approved", noun: "approved by you", notice: "reviewed" },
       groups: [
-        { id: "drafts", title: "Drafts", hint: "Reviews you've started but not submitted", link: "files" },
+        { id: "pending", title: "Pending reviews", hint: "Reviews you've started but not submitted", link: "files" },
         { id: "requested", title: "Requested from you", hint: "Not started yet", link: "files" },
         { id: "reviewed", title: "Reviewed, still open", hint: "You've reviewed but not approved", link: "files" },
         { id: "approved", title: "Approved by you", hint: "Still open", link: "files", quiet: true, decided: true },
@@ -138,7 +138,7 @@
 
   function side(pr, decided) {
     const parts = [];
-    if (pr.draftComments !== null) parts.push(`<span class="badge">${pr.draftComments} draft comment${pr.draftComments === 1 ? "" : "s"}</span>`);
+    if (pr.pendingComments !== null) parts.push(`<span class="badge">${pr.pendingComments} pending comment${pr.pendingComments === 1 ? "" : "s"}</span>`);
     if (pr.reviewDecision === "APPROVED" && !decided) parts.push('<span class="label approved">Approved</span>');
     if (pr.reviewDecision === "CHANGES_REQUESTED") parts.push('<span class="label changes">Changes requested</span>');
     parts.push(`<span><span class="add">+${pr.additions}</span> <span class="del">−${pr.deletions}</span></span>`);
@@ -148,7 +148,7 @@
 
   function rowHtml(pr, g) {
     const href = g.link ? `${pr.url}/${g.link}` : pr.url;
-    const when = pr.draftUpdatedAt ? `draft updated ${ago(pr.draftUpdatedAt)}` : `updated ${ago(pr.updatedAt)}`;
+    const when = pr.pendingUpdatedAt ? `review updated ${ago(pr.pendingUpdatedAt)}` : `updated ${ago(pr.updatedAt)}`;
     return `<a class="row" href="${escape(href)}" target="_blank" rel="noopener">
       ${pr.isDraft ? DRAFT_ICON : OPEN_ICON}
       <span class="title">${escape(pr.title)}</span>

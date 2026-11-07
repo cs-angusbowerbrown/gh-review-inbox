@@ -6,7 +6,7 @@ It has two pages. **Reviewing** covers other people's pull requests:
 
 | Group | What's in it |
 | --- | --- |
-| Drafts | PRs where you've written review comments but haven't submitted the review |
+| Pending reviews | PRs where you've written review comments but haven't submitted the review |
 | Requested from you | PRs waiting on your review that you haven't started |
 | Reviewed, still open | PRs you've reviewed but not approved, that haven't merged |
 | Approved by you | PRs whose latest approve-or-request-changes review from you is an approval. Hidden until you ask for it |
@@ -44,8 +44,8 @@ The page is meant to stay open in a tab. It refreshes when you come back to it, 
 
 The terminal view is built with [OpenTUI](https://opentui.com). `j`/`k` or the mouse wheel move the selection, `g`/`G` jump to the top and bottom, `1`/`2` (or `tab`) switch between Reviewing and Yours, `o` or `enter` opens the selected PR, `f` opens its files changed, `a` shows or hides the PRs you've approved and `d` your draft PRs (on the web page, use the button in the group heading), `r` refreshes and `q` quits. `?` shows every key. The header shows where you are in the list, as in `3/20`. `/` filters by title, repository, PR number or author and highlights the matches. `enter` keeps the filter while you move through them, and `esc` clears it. It also refreshes when the terminal regains focus. `W` (shift) starts and opens the web view after a `y`/`n` confirmation. A server started that way stops when the TUI quits; one already running on the port is left alone.
 
-## How drafts are found
+## How pending reviews are found
 
 Search can't find pending reviews, so `gh review-inbox` lists the open PRs in every organisation you belong to and in your own repositories, and asks the GraphQL API which of them hold a pending review of yours. It then fetches the full details for those PRs only. On an organisation with a couple of hundred open PRs, a refresh takes about five seconds.
 
-A draft on a repository outside those owners only appears if its author has requested your review, and then without its draft comment count.
+A pending review on a repository outside those owners only appears if its author has requested your review, and then without its comment count.

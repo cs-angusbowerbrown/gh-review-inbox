@@ -16,11 +16,11 @@ export type Row = {
   reviewDecision: "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | null
   yourReview: "APPROVED" | "CHANGES_REQUESTED" | "DISMISSED" | null
   checks: "SUCCESS" | "FAILURE" | "ERROR" | "PENDING" | "EXPECTED" | null
-  draftComments: number | null
-  draftUpdatedAt: string | null
+  pendingComments: number | null
+  pendingUpdatedAt: string | null
 }
 
-export type GroupId = "drafts" | "requested" | "reviewed" | "approved" | "mineDraft" | "mineWaiting" | "mineInReview" | "mineApproved"
+export type GroupId = "pending" | "requested" | "reviewed" | "approved" | "mineDraft" | "mineWaiting" | "mineInReview" | "mineApproved"
 
 export type Inbox = {
   login: string
@@ -38,7 +38,7 @@ const PAGES: { title: string; groups: Group[]; optional: Optional }[] = [
     title: "Reviewing",
     optional: { id: "approved", key: "a", noun: "approved", notice: "reviewed" },
     groups: [
-      { id: "drafts", title: "Drafts", hint: "started, not submitted" },
+      { id: "pending", title: "Pending reviews", hint: "started, not submitted" },
       { id: "requested", title: "Requested from you", hint: "not started" },
       { id: "reviewed", title: "Reviewed, still open", hint: "not approved by you" },
       { id: "approved", title: "Approved by you", hint: "still open", quiet: true, decided: true },
@@ -193,7 +193,7 @@ function ConfirmWeb({ screen }: { screen: { width: number; height: number } }) {
 }
 
 function PrRow({ row, selected, query, group }: { row: Row; selected: boolean; query: string; group: Group }) {
-  const when = row.draftUpdatedAt ? `draft updated ${ago(row.draftUpdatedAt)}` : `updated ${ago(row.updatedAt)}`
+  const when = row.pendingUpdatedAt ? `review updated ${ago(row.pendingUpdatedAt)}` : `updated ${ago(row.updatedAt)}`
   return (
     <box id={row.key} paddingLeft={1} paddingRight={1} backgroundColor={selected ? C.selected : undefined}>
       <box flexDirection="row" justifyContent="space-between" gap={2}>
@@ -202,7 +202,7 @@ function PrRow({ row, selected, query, group }: { row: Row; selected: boolean; q
           <strong><Highlighted text={row.title} query={query} /></strong>
         </text>
         <text flexShrink={0}>
-          {row.draftComments !== null ? <span fg={C.accent}>{`${row.draftComments} draft  `}</span> : null}
+          {row.pendingComments !== null ? <span fg={C.accent}>{`${row.pendingComments} pending  `}</span> : null}
           {row.reviewDecision === "APPROVED" && !group.decided ? <span fg={C.green}>approved  </span> : null}
           {row.reviewDecision === "CHANGES_REQUESTED" ? <span fg={C.red}>changes requested  </span> : null}
           <span fg={C.green}>{`+${row.additions} `}</span>

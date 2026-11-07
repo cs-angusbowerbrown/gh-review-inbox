@@ -98,8 +98,8 @@ def row(pr, login):
         "yourReview": opinion,
         "reviewers": len(others),
         "checks": rollup["state"] if rollup else None,
-        "draftComments": sum(r["comments"]["totalCount"] for r in mine) if mine else None,
-        "draftUpdatedAt": max(r["updatedAt"] for r in mine) if mine else None,
+        "pendingComments": sum(r["comments"]["totalCount"] for r in mine) if mine else None,
+        "pendingUpdatedAt": max(r["updatedAt"] for r in mine) if mine else None,
     }
 
 
@@ -118,15 +118,15 @@ def inbox():
         found["scan"] = scan.result()
 
     rows = {name: [row(pr, login) for pr in prs] for name, prs in found.items()}
-    drafts = [r for r in rows["scan"] + rows["requested"] + rows["reviewed"] if r["draftComments"] is not None]
-    drafts = list({r["key"]: r for r in drafts}.values())
-    seen = {r["key"] for r in drafts}
+    pending = [r for r in rows["scan"] + rows["requested"] + rows["reviewed"] if r["pendingComments"] is not None]
+    pending = list({r["key"]: r for r in pending}.values())
+    seen = {r["key"] for r in pending}
     requested = [r for r in rows["requested"] if r["key"] not in seen]
     seen |= {r["key"] for r in requested}
     reviewed = [r for r in rows["reviewed"] if r["key"] not in seen and r["yourReview"] != "APPROVED"]
     approved = [r for r in rows["reviewed"] if r["key"] not in seen and r["yourReview"] == "APPROVED"]
 
-    by_recent = lambda r: r["draftUpdatedAt"] or r["updatedAt"]
+    by_recent = lambda r: r["pendingUpdatedAt"] or r["updatedAt"]
     mine = {"mineDraft": [], "mineWaiting": [], "mineInReview": [], "mineApproved": []}
     for r in rows["mine"]:
         if r["isDraft"]:
@@ -142,7 +142,7 @@ def inbox():
         "owners": [o.split(":", 1)[1] for o in owners],
         "fetchedAt": datetime.now(timezone.utc).isoformat(),
         "groups": {
-            "drafts": sorted(drafts, key=by_recent, reverse=True),
+            "pending": sorted(pending, key=by_recent, reverse=True),
             "requested": sorted(requested, key=by_recent, reverse=True),
             "reviewed": sorted(reviewed, key=by_recent, reverse=True),
             "approved": sorted(approved, key=by_recent, reverse=True),
