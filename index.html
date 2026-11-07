@@ -72,6 +72,25 @@
   .PENDING, .EXPECTED { background: var(--amber); }
   .add { color: var(--green); } .del { color: var(--red); }
   .error { background: var(--bg); border: 1px solid var(--red); color: var(--red); border-radius: 6px; padding: 12px 16px; margin-bottom: 16px; white-space: pre-wrap; }
+  .status { display: flex; align-items: center; gap: 6px; }
+  .spinner {
+    width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid var(--border); border-top-color: var(--accent);
+    animation: spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .skeleton { display: grid; grid-template-columns: 16px 1fr; gap: 8px 10px; padding: 12px 16px; border-top: 1px solid var(--border); }
+  .skeleton:first-of-type { border-top: 0; }
+  .bone {
+    height: 10px; border-radius: 5px; grid-column: 2;
+    background: linear-gradient(100deg, var(--row-hover) 30%, var(--border) 50%, var(--row-hover) 70%) var(--row-hover);
+    background-size: 300% 100%; animation: shimmer 1.6s ease-in-out infinite; animation-delay: var(--delay);
+  }
+  .bone.dot { grid-column: 1; grid-row: 1; width: 14px; height: 14px; border-radius: 50%; margin-top: -2px; }
+  .bone.meta { height: 8px; opacity: .7; }
+  @keyframes shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
+  @media (prefers-reduced-motion: reduce) {
+    .spinner, .bone { animation: none; }
+  }
   @media (max-width: 640px) {
     a.row { grid-template-columns: 16px 1fr; }
     .side { grid-column: 2; flex-wrap: wrap; }
@@ -82,7 +101,7 @@
 <main>
   <header>
     <h1>Review inbox</h1>
-    <span class="status" id="status">Loading…</span>
+    <span class="status" id="status"></span>
     <button id="refresh">Refresh</button>
   </header>
   <nav id="tabs"></nav>
@@ -180,6 +199,27 @@
     }).join("");
   }
 
+  function skeleton() {
+    const current = pageIndex();
+    document.getElementById("tabs").innerHTML = PAGES.map((page, i) =>
+      `<a href="#${page.id}"${i === current ? ' aria-current="page"' : ""}><kbd>${i + 1}</kbd>${page.title}</a>`
+    ).join("");
+    const page = PAGES[current];
+    let line = 0;
+    document.getElementById("groups").innerHTML = page.groups.filter((g) => g.id !== page.optional.id).map((g, i) => {
+      const rows = Array.from({ length: [2, 1, 2, 1][i % 4] }, (_, r) => {
+        const seed = (i * 7 + r * 13) % 10;
+        const delay = `--delay:${(line++) * 0.08}s`;
+        return `<div class="skeleton">
+          <span class="bone dot" style="${delay}"></span>
+          <span class="bone" style="${delay};width:${45 + seed * 3}%"></span>
+          <span class="bone meta" style="${delay};width:${25 + seed * 2}%"></span>
+        </div>`;
+      }).join("");
+      return `<section aria-hidden="true"><h2>${g.title}<span class="hint">${g.hint}</span></h2>${rows}</section>`;
+    }).join("");
+  }
+
   let last = null;
   let lastFetch = 0;
   let inFlight = false;
@@ -187,8 +227,9 @@
   const button = document.getElementById("refresh");
 
   function showStatus() {
-    if (inFlight) status.textContent = last ? `Refreshing… (last ${ago(last.fetchedAt)})` : "Loading…";
+    if (inFlight) status.innerHTML = `<span class="spinner"></span>${last ? `Refreshing (last ${ago(last.fetchedAt)})` : "Loading"}`;
     else if (last) status.textContent = `${last.login} · ${last.owners.join(", ")} · ${ago(last.fetchedAt)}`;
+    else status.textContent = "";
   }
 
   async function load() {
@@ -206,6 +247,7 @@
       document.getElementById("error").innerHTML = "";
     } catch (error) {
       document.getElementById("error").innerHTML = `<div class="error">${escape(error.message)}</div>`;
+      if (!last) document.getElementById("groups").innerHTML = "";
     } finally {
       inFlight = false;
       button.disabled = false;
@@ -214,7 +256,7 @@
   }
 
   button.addEventListener("click", load);
-  window.addEventListener("hashchange", () => last && render(last));
+  window.addEventListener("hashchange", () => last ? render(last) : skeleton());
   document.addEventListener("keydown", (event) => {
     if (event.metaKey || event.ctrlKey || event.altKey || event.target.closest("input, textarea")) return;
     const page = PAGES[Number(event.key) - 1];
@@ -231,6 +273,7 @@
     if (document.visibilityState === "visible" && Date.now() - lastFetch > 30000) load();
   });
   setInterval(showStatus, 30000);
+  skeleton();
   load();
 </script>
 </body>

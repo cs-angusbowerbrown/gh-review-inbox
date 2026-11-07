@@ -192,6 +192,55 @@ function ConfirmWeb({ screen }: { screen: { width: number; height: number } }) {
   )
 }
 
+const SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+const SHIMMER = ["#21262d", "#282e37", "#313843", "#3d4450", "#4a525e"]
+const SHIMMER_BAND = 10
+const SKELETON_ROWS = [2, 1, 2, 1]
+
+function Shimmer({ length, line, frame, width }: { length: number; line: number; frame: number; width: number }) {
+  const period = width + SHIMMER_BAND * 4
+  const head = ((frame * 2 - line * 3) % period + period) % period - SHIMMER_BAND
+  const runs: { color: string; size: number }[] = []
+  for (let x = 0; x < length; x++) {
+    const glow = Math.max(0, 1 - Math.abs(x - head) / SHIMMER_BAND)
+    const color = SHIMMER[Math.round(glow * (SHIMMER.length - 1))]
+    if (runs.at(-1)?.color === color) runs.at(-1)!.size++
+    else runs.push({ color, size: 1 })
+  }
+  return <>{runs.map((run, i) => <span key={i} fg={run.color}>{"━".repeat(run.size)}</span>)}</>
+}
+
+function Skeleton({ groups, frame, width }: { groups: Group[]; frame: number; width: number }) {
+  const inner = Math.max(10, width - 8)
+  let line = 0
+  return (
+    <>
+      {groups.map((g, i) => (
+        <box key={g.id} flexDirection="column" marginBottom={1} border borderStyle="rounded" borderColor={C.border}
+          title={fit([g.title, g.hint], width - 6)}>
+          {Array.from({ length: SKELETON_ROWS[i % SKELETON_ROWS.length] }, (_, r) => {
+            const seed = (i * 7 + r * 13) % 10
+            const title = line++
+            const meta = line++
+            return (
+              <box key={r} paddingLeft={1} paddingRight={1}>
+                <text wrapMode="none">
+                  {"  "}
+                  <Shimmer length={Math.round(inner * (0.45 + seed * 0.03))} line={title} frame={frame} width={inner} />
+                </text>
+                <text wrapMode="none">
+                  {"  "}
+                  <Shimmer length={Math.round(inner * (0.25 + seed * 0.02))} line={meta} frame={frame} width={inner} />
+                </text>
+              </box>
+            )
+          })}
+        </box>
+      ))}
+    </>
+  )
+}
+
 function PrRow({ row, selected, query, group }: { row: Row; selected: boolean; query: string; group: Group }) {
   const when = row.pendingUpdatedAt ? `review updated ${ago(row.pendingUpdatedAt)}` : `updated ${ago(row.updatedAt)}`
   return (
@@ -236,6 +285,7 @@ export function App({ load, open, web }: { load: () => Promise<Inbox>; open: (ur
   const [shown, setShown] = useState<Set<GroupId>>(new Set())
   const [page, setPage] = useState(0)
   const [, tick] = useState(0)
+  const [frame, setFrame] = useState(0)
   const inFlight = useRef(false)
   const lastFetch = useRef(0)
 
@@ -260,6 +310,12 @@ export function App({ load, open, web }: { load: () => Promise<Inbox>; open: (ur
     const timer = setInterval(() => tick((n) => n + 1), 30_000)
     return () => clearInterval(timer)
   }, [refresh])
+
+  useEffect(() => {
+    if (!loading) return
+    const timer = setInterval(() => setFrame((n) => n + 1), 50)
+    return () => clearInterval(timer)
+  }, [loading])
 
   useFocus(() => {
     if (Date.now() - lastFetch.current > STALE_MS) refresh()
@@ -338,8 +394,9 @@ export function App({ load, open, web }: { load: () => Promise<Inbox>; open: (ur
 
   const footerItems = footer(optional, shown.has(optional.id), inbox?.groups[optional.id].length ?? 0, width - 3)
 
+  const spinner = loading ? <span fg={C.accent}>{`${SPINNER[Math.floor(frame / 2) % SPINNER.length]} `}</span> : null
   const status = loading
-    ? inbox ? `refreshing… (last ${ago(inbox.fetchedAt)})` : "loading…"
+    ? inbox ? `refreshing (last ${ago(inbox.fetchedAt)})` : "loading"
     : inbox ? `${inbox.login} · ${ago(inbox.fetchedAt)}` : ""
 
   return (
@@ -356,6 +413,7 @@ export function App({ load, open, web }: { load: () => Promise<Inbox>; open: (ur
         </text>
         <text fg={C.muted}>
           {list.length ? <span fg={C.fg}>{`${index + 1}/${list.length}  `}</span> : null}
+          {spinner}
           {status}
         </text>
       </box>
@@ -378,7 +436,9 @@ export function App({ load, open, web }: { load: () => Promise<Inbox>; open: (ur
                 </box>
               )
             })
-          : null}
+          : loading
+            ? <Skeleton groups={PAGES[page].groups.filter((g) => g.id !== optional.id)} frame={frame} width={width} />
+            : null}
         </box>
       </scrollbox>
       {filtering || query ? (
