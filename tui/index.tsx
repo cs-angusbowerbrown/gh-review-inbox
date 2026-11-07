@@ -18,8 +18,15 @@ function open(url: string) {
 
 const servers: ReturnType<typeof Bun.spawn>[] = []
 
-function web() {
-  servers.push(Bun.spawn([script, "web"], { stdin: "ignore", stdout: "ignore", stderr: "ignore" }))
+const WEB_URL = "http://127.0.0.1:7357/"
+
+function web(andOpen: boolean) {
+  if (servers.length) {
+    if (andOpen) open(WEB_URL)
+    return
+  }
+  const args = andOpen ? [script, "web", "--open"] : [script, "web"]
+  servers.push(Bun.spawn(args, { stdin: "ignore", stdout: "ignore", stderr: "ignore" }))
 }
 
 const SAVE_TERMINAL_TITLE = "\x1b[22;2t"

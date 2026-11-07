@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import sys
+import urllib.request
 import webbrowser
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -13,6 +14,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 PAGE = ROOT / "index.html"
+APP = "gh-review-inbox"
 TUI = ROOT / "tui"
 OPEN = "is:open is:pr archived:false"
 
@@ -182,6 +184,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Cache-Control", "no-store")
+        self.send_header("X-App", APP)
         self.end_headers()
         self.wfile.write(body)
 
@@ -198,11 +201,19 @@ def tui():
     os.execv(bun, [bun, "run", str(TUI / "index.tsx")])
 
 
+def serving_us(url):
+    try:
+        with urllib.request.urlopen(url, timeout=2) as response:
+            return response.headers.get("X-App") == APP
+    except OSError:
+        return False
+
+
 def main():
     parser = argparse.ArgumentParser(prog="gh review-inbox", description="Local review inbox for your GitHub account.")
     parser.add_argument("view", nargs="?", choices=["web", "tui"], default="web", help="web page (default) or terminal UI")
     parser.add_argument("--port", type=int, default=7357)
-    parser.add_argument("--no-open", action="store_true", help="don't open the browser")
+    parser.add_argument("--open", action="store_true", help="also open the page in your browser")
     parser.add_argument("--json", action="store_true", help="print the inbox as JSON and exit")
     args = parser.parse_args()
 
@@ -217,13 +228,15 @@ def main():
     try:
         server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     except OSError:
-        print(f"Port {args.port} is in use; opening {url} on the assumption gh review-inbox is already running.")
-        if not args.no_open:
+        if not serving_us(url):
+            sys.exit(f"Port {args.port} is in use by another program. Pick another with --port.")
+        print(f"gh review-inbox is already running on {url}")
+        if args.open:
             webbrowser.open(url)
         return
 
     print(f"gh review-inbox on {url} (Ctrl-C to stop)")
-    if not args.no_open:
+    if args.open:
         webbrowser.open(url)
     try:
         server.serve_forever()

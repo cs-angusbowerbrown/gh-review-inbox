@@ -83,7 +83,7 @@ const KEYS: { key: string; label: string; footer?: string; footerKey?: string }[
   { key: "1 / 2 / tab", label: "reviewing / your pull requests", footer: "pages", footerKey: "1/2" },
   { key: "o / enter", label: "open pull request", footer: "open" },
   { key: "f", label: "open files changed", footer: "files" },
-  { key: "W", label: "start and open the web view" },
+  { key: "W", label: "start the web view, then open it" },
   { key: "a", label: "show / hide PRs you've approved" },
   { key: "d", label: "show / hide your draft PRs" },
   { key: "/", label: "filter by title, repo or author", footer: "filter" },
@@ -197,9 +197,10 @@ function ConfirmWeb({ screen }: { screen: { width: number; height: number } }) {
   return (
     <Modal screen={screen} size={{ width: 54, height: 8 }} title="web view">
       <text fg={C.fg}>Start the web view server in the background?</text>
-      <text fg={C.muted}>It stops when you quit the TUI.</text>
+      <text fg={C.muted}>It stops when you quit the TUI. W opens it.</text>
       <text marginTop={1}>
-        <span fg={C.accent}>y</span><span fg={C.muted}> start and open   </span>
+        <span fg={C.accent}>y</span><span fg={C.muted}> start   </span>
+        <span fg={C.accent}>o</span><span fg={C.muted}> start and open   </span>
         <span fg={C.accent}>n</span><span fg={C.muted}> cancel</span>
       </text>
     </Modal>
@@ -345,7 +346,7 @@ function useInbox(load: () => Promise<Inbox>) {
 
 type Overlay = "filter" | "help" | "confirmWeb" | null
 
-export function App({ load, open, web }: { load: () => Promise<Inbox>; open: (url: string) => void; web: () => void }) {
+export function App({ load, open, web }: { load: () => Promise<Inbox>; open: (url: string) => void; web: (open: boolean) => void }) {
   const renderer = useRenderer()
   const { width, height } = useTerminalDimensions()
   const scrolls = useRef<(ScrollBoxRenderable | null)[]>([])
@@ -430,8 +431,8 @@ export function App({ load, open, web }: { load: () => Promise<Inbox>; open: (ur
       }
     }
     else if (overlay === "confirmWeb") {
-      if (key.name === "y") {
-        web()
+      if (key.name === "y" || key.name === "o") {
+        web(key.name === "o")
         setServing(true)
         setOverlay(null)
       }
@@ -456,7 +457,7 @@ export function App({ load, open, web }: { load: () => Promise<Inbox>; open: (ur
       if (!next.delete(optional.id)) next.add(optional.id)
       return next
     })
-    else if (key.shift && key.name === "w") serving ? web() : setOverlay("confirmWeb")
+    else if (key.shift && key.name === "w") serving ? web(true) : setOverlay("confirmWeb")
     else if ((key.name === "o" || key.name === "return") && current) open(current.url)
     else if (key.name === "f" && current) open(`${current.url}/files`)
   })

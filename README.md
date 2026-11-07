@@ -33,16 +33,19 @@ It needs Python 3, and it uses your existing `gh` login, so there's no token to 
 ## Use
 
 ```sh
-gh review-inbox         # serve the inbox on http://127.0.0.1:7357 and open it
+gh review-inbox         # serve the inbox on http://127.0.0.1:7357
+gh review-inbox --open  # serve it and open it in your browser
 gh review-inbox tui     # the same inbox in the terminal
 gh review-inbox --json  # print the inbox as JSON
 ```
 
 The page is meant to stay open in a tab. It refreshes when you come back to it, and links open in a new tab. Review links go straight to "Files changed".
 
-`--port` picks another port, and `--no-open` skips opening the browser.
+The port stays the same, so you can bookmark the page. `--port` picks another one. If a copy is already running on the port, `gh review-inbox` leaves it alone (and opens it with `--open`). If another program holds the port, it stops and says so.
 
-The terminal view is built with [OpenTUI](https://opentui.com). `j`/`k` or the mouse wheel move the selection, `g`/`G` jump to the top and bottom, `1`/`2` (or `tab`) switch between Reviewing and Yours, `o` or `enter` opens the selected PR, `f` opens its files changed, `a` shows or hides the PRs you've approved and `d` your draft PRs (on the web page, use the button in the group heading), `r` refreshes and `q` quits. `?` shows every key. The header shows where you are in the list, as in `3/20`. `/` filters by title, repository, PR number or author and highlights the matches. `enter` keeps the filter while you move through them, and `esc` clears it. It also refreshes when the terminal regains focus. `W` (shift) starts and opens the web view after a `y`/`n` confirmation. A server started that way stops when the TUI quits; one already running on the port is left alone.
+The web page has the same keys as the terminal view, listed along its bottom edge. `?` shows them all.
+
+The terminal view is built with [OpenTUI](https://opentui.com). `j`/`k` or the mouse wheel move the selection, `g`/`G` jump to the top and bottom, `1`/`2` (or `tab`) switch between Reviewing and Yours, `o` or `enter` opens the selected PR, `f` opens its files changed, `a` shows or hides the PRs you've approved and `d` your draft PRs, `r` refreshes and `q` quits. `?` shows every key. The header shows where you are in the list, as in `3/20`. `/` filters by title, repository, PR number or author and highlights the matches. `enter` keeps the filter while you move through them, and `esc` clears it. It also refreshes when the terminal regains focus. `W` (shift) asks whether to start the web view server: `y` starts it and `o` starts and opens it. Once it's running, `W` opens the page. A server started that way stops when the TUI quits; one already running on the port is left alone.
 
 ## How pending reviews are found
 
